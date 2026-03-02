@@ -74,7 +74,8 @@ func parseLiteral(s string) (value, rest string, err error) {
 	i := 1
 	for i < len(s) {
 		c := s[i]
-		if c == '\\' {
+		switch c {
+		case '\\':
 			i++
 			if i >= len(s) {
 				return "", "", fmt.Errorf("unterminated escape in literal")
@@ -94,7 +95,7 @@ func parseLiteral(s string) (value, rest string, err error) {
 				buf.WriteByte('\\')
 				buf.WriteByte(s[i])
 			}
-		} else if c == '"' {
+		case '"':
 			// End of literal content
 			rest := s[i+1:]
 			rest = strings.TrimSpace(rest)
@@ -119,7 +120,7 @@ func parseLiteral(s string) (value, rest string, err error) {
 				}
 			}
 			return buf.String(), rest, nil
-		} else {
+		default:
 			buf.WriteByte(c)
 		}
 		i++
