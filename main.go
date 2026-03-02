@@ -23,8 +23,9 @@ func main() {
 	if esIndex == "" {
 		log.Fatal("ES_INDEX environment variable is required")
 	}
+	esAPIKey := os.Getenv("ES_API_KEY")
 
-	idx, err := indexer.New(esURL, esIndex, defaultBatchSize)
+	idx, err := indexer.New(esURL, esIndex, esAPIKey, defaultBatchSize)
 	if err != nil {
 		log.Fatalf("create indexer: %v", err)
 	}

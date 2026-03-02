@@ -24,11 +24,13 @@ type Indexer struct {
 
 // New creates a new Indexer.
 // esURL is the Elasticsearch URL (e.g. "http://localhost:9200").
+// apiKey is the Elasticsearch API key (optional).
 // indexName is the target Elasticsearch index.
 // batchSize is the number of documents to accumulate before flushing.
-func New(esURL, indexName string, batchSize int) (*Indexer, error) {
+func New(esURL, indexName, apiKey string, batchSize int) (*Indexer, error) {
 	cfg := elasticsearch.Config{
 		Addresses: []string{esURL},
+		APIKey:    apiKey,
 	}
 	client, err := elasticsearch.NewClient(cfg)
 	if err != nil {
@@ -96,7 +98,11 @@ func (idx *Indexer) Flush(ctx context.Context) error {
 		return fmt.Errorf("decode bulk response: %w", err)
 	}
 	if errors, ok := result["errors"].(bool); ok && errors {
-		return fmt.Errorf("bulk indexing reported errors")
+		pretty, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return fmt.Errorf("bulk indexing reported errors: %v", result)
+		}
+		return fmt.Errorf("bulk indexing reported errors:\n%s", pretty)
 	}
 	idx.buf.Reset()
 	idx.count = 0

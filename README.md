@@ -16,6 +16,7 @@ zcat data.nq.gz | LC_ALL=C sort | ES_URL=http://localhost:9200 ES_INDEX=my-index
 |------------|---------------------------|---------------------------------|
 | `ES_URL`   | `http://localhost:9200`  | Elasticsearch URL               |
 | `ES_INDEX` | *(required)*             | Target Elasticsearch index name |
+| `ES_API_KEY` | *(optional)*           | Elasticsearch API Key           |
 
 ## Document Format
 
