@@ -8,6 +8,9 @@
 *.so
 *.dylib
 
+# Build output - the main binary
+rdf-index-elasticsearch
+
 # Test binary, built with `go test -c`
 *.test
 
