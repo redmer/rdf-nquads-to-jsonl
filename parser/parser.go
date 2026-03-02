@@ -3,6 +3,7 @@ package parser
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -10,7 +11,7 @@ import (
 type Quad struct {
 	Subject   string
 	Predicate string
-	Object    string
+	Object    interface{}
 }
 
 // ParseQuad parses a single N-Quad line and returns a Quad.
@@ -22,14 +23,24 @@ func ParseQuad(line string) (Quad, error) {
 		return Quad{}, fmt.Errorf("skip: %q", line)
 	}
 
-	subj, rest, err := parseField(line)
+	subjVal, rest, err := parseField(line)
 	if err != nil {
 		return Quad{}, fmt.Errorf("subject: %w", err)
 	}
-	pred, rest, err := parseField(strings.TrimSpace(rest))
+	subj, ok := subjVal.(string)
+	if !ok {
+		return Quad{}, fmt.Errorf("subject must be a URI, got %T", subjVal)
+	}
+
+	predVal, rest, err := parseField(strings.TrimSpace(rest))
 	if err != nil {
 		return Quad{}, fmt.Errorf("predicate: %w", err)
 	}
+	pred, ok := predVal.(string)
+	if !ok {
+		return Quad{}, fmt.Errorf("predicate must be a URI, got %T", predVal)
+	}
+
 	obj, _, err := parseField(strings.TrimSpace(rest))
 	if err != nil {
 		return Quad{}, fmt.Errorf("object: %w", err)
@@ -42,9 +53,9 @@ func ParseQuad(line string) (Quad, error) {
 // Fields can be:
 //   - <URI>            → returns URI string
 //   - "literal"        → returns literal string (handles @lang and ^^<datatype>)
-func parseField(s string) (value, rest string, err error) {
+func parseField(s string) (value interface{}, rest string, err error) {
 	if len(s) == 0 {
-		return "", "", fmt.Errorf("empty input")
+		return nil, "", fmt.Errorf("empty input")
 	}
 	switch s[0] {
 	case '<':
@@ -52,23 +63,23 @@ func parseField(s string) (value, rest string, err error) {
 	case '"':
 		return parseLiteral(s)
 	default:
-		return "", "", fmt.Errorf("unexpected character %q", s[0])
+		return nil, "", fmt.Errorf("unexpected character %q", s[0])
 	}
 }
 
 // parseURI reads a URI enclosed in <> and returns the URI value and remainder.
-func parseURI(s string) (value, rest string, err error) {
+func parseURI(s string) (value interface{}, rest string, err error) {
 	// s starts with '<'
 	end := strings.Index(s[1:], ">")
 	if end < 0 {
-		return "", "", fmt.Errorf("unterminated URI: %q", s)
+		return nil, "", fmt.Errorf("unterminated URI: %q", s)
 	}
 	return s[1 : end+1], s[end+2:], nil
 }
 
 // parseLiteral reads a quoted literal and returns the unescaped string value plus the remainder.
 // The remainder may include @lang or ^^<datatype> which are consumed and discarded.
-func parseLiteral(s string) (value, rest string, err error) {
+func parseLiteral(s string) (value interface{}, rest string, err error) {
 	// s starts with '"'
 	var buf strings.Builder
 	i := 1
@@ -78,7 +89,7 @@ func parseLiteral(s string) (value, rest string, err error) {
 		case '\\':
 			i++
 			if i >= len(s) {
-				return "", "", fmt.Errorf("unterminated escape in literal")
+				return nil, "", fmt.Errorf("unterminated escape in literal")
 			}
 			switch s[i] {
 			case '"':
@@ -99,6 +110,10 @@ func parseLiteral(s string) (value, rest string, err error) {
 			// End of literal content
 			rest := s[i+1:]
 			rest = strings.TrimSpace(rest)
+
+			rawVal := buf.String()
+			var datatype string
+
 			// Consume optional @lang or ^^<datatype>
 			if strings.HasPrefix(rest, "@") {
 				// consume up to next whitespace
@@ -110,20 +125,46 @@ func parseLiteral(s string) (value, rest string, err error) {
 				}
 			} else if strings.HasPrefix(rest, "^^") {
 				// consume ^^<datatype>
-				rest = strings.TrimPrefix(rest, "^^")
-				rest = strings.TrimSpace(rest)
-				if len(rest) > 0 && rest[0] == '<' {
-					_, rest, err = parseURI(rest)
+				tempRest := strings.TrimPrefix(rest, "^^")
+				tempRest = strings.TrimSpace(tempRest)
+				if len(tempRest) > 0 && tempRest[0] == '<' {
+					var uriVal interface{}
+					uriVal, rest, err = parseURI(tempRest)
 					if err != nil {
-						return "", "", fmt.Errorf("datatype URI: %w", err)
+						return nil, "", fmt.Errorf("datatype URI: %w", err)
 					}
+					datatype = uriVal.(string)
 				}
 			}
-			return buf.String(), rest, nil
+
+			if datatype != "" {
+				switch datatype {
+				case "http://www.w3.org/2001/XMLSchema#boolean":
+					b, err := strconv.ParseBool(rawVal)
+					if err != nil {
+						return nil, "", fmt.Errorf("invalid boolean: %q", rawVal)
+					}
+					return b, rest, nil
+				case "http://www.w3.org/2001/XMLSchema#integer", "http://www.w3.org/2001/XMLSchema#int":
+					n, err := strconv.ParseInt(rawVal, 10, 64)
+					if err != nil {
+						return nil, "", fmt.Errorf("invalid integer: %q", rawVal)
+					}
+					return n, rest, nil
+				case "http://www.w3.org/2001/XMLSchema#decimal", "http://www.w3.org/2001/XMLSchema#double", "http://www.w3.org/2001/XMLSchema#float":
+					f, err := strconv.ParseFloat(rawVal, 64)
+					if err != nil {
+						return nil, "", fmt.Errorf("invalid decimal: %q", rawVal)
+					}
+					return f, rest, nil
+				}
+			}
+
+			return rawVal, rest, nil
 		default:
 			buf.WriteByte(c)
 		}
 		i++
 	}
-	return "", "", fmt.Errorf("unterminated literal: %q", s)
+	return nil, "", fmt.Errorf("unterminated literal: %q", s)
 }

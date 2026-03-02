@@ -8,12 +8,12 @@ import (
 
 func TestParseQuad(t *testing.T) {
 	tests := []struct {
-		name      string
-		line      string
-		wantSubj  string
-		wantPred  string
-		wantObj   string
-		wantErr   bool
+		name     string
+		line     string
+		wantSubj string
+		wantPred string
+		wantObj  interface{}
+		wantErr  bool
 	}{
 		{
 			name:     "URI object",
@@ -41,7 +41,7 @@ func TestParseQuad(t *testing.T) {
 			line:     `<https://example.com/person/123> <http://schema.org/age> "42"^^<http://www.w3.org/2001/XMLSchema#integer> <https://example.com/graph> .`,
 			wantSubj: "https://example.com/person/123",
 			wantPred: "http://schema.org/age",
-			wantObj:  "42",
+			wantObj:  int64(42),
 		},
 		{
 			name:     "no graph (triple format)",
@@ -59,6 +59,55 @@ func TestParseQuad(t *testing.T) {
 			name:    "comment line",
 			line:    `# this is a comment`,
 			wantErr: true,
+		},
+		{
+			name:     "boolean true",
+			line:     `<http://example.org/s> <http://example.org/p> "true"^^<http://www.w3.org/2001/XMLSchema#boolean> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  true,
+		},
+		{
+			name:     "boolean false",
+			line:     `<http://example.org/s> <http://example.org/p> "false"^^<http://www.w3.org/2001/XMLSchema#boolean> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  false,
+		},
+		{
+			name:     "integer",
+			line:     `<http://example.org/s> <http://example.org/p> "123"^^<http://www.w3.org/2001/XMLSchema#integer> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  int64(123),
+		},
+		{
+			name:     "xsd:int",
+			line:     `<http://example.org/s> <http://example.org/p> "456"^^<http://www.w3.org/2001/XMLSchema#int> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  int64(456),
+		},
+		{
+			name:     "decimal",
+			line:     `<http://example.org/s> <http://example.org/p> "123.45"^^<http://www.w3.org/2001/XMLSchema#decimal> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  123.45,
+		},
+		{
+			name:     "xsd:double",
+			line:     `<http://example.org/s> <http://example.org/p> "1.23e2"^^<http://www.w3.org/2001/XMLSchema#double> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  123.0,
+		},
+		{
+			name:     "xsd:float",
+			line:     `<http://example.org/s> <http://example.org/p> "1.23e2"^^<http://www.w3.org/2001/XMLSchema#float> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  123.0,
 		},
 		{
 			name:     "literal with escaped quote",
@@ -88,7 +137,7 @@ func TestParseQuad(t *testing.T) {
 				t.Errorf("Predicate = %q, want %q", quad.Predicate, tt.wantPred)
 			}
 			if quad.Object != tt.wantObj {
-				t.Errorf("Object = %q, want %q", quad.Object, tt.wantObj)
+				t.Errorf("Object = %v, want %v", quad.Object, tt.wantObj)
 			}
 		})
 	}

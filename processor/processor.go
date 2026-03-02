@@ -12,7 +12,7 @@ type Document struct {
 	// ID is the Subject URI used as the Elasticsearch document _id.
 	ID string
 	// Fields maps predicate keys (dots replaced by spaces) to arrays of object values.
-	Fields map[string][]string
+	Fields map[string][]interface{}
 }
 
 // EmitFunc is called whenever a complete document has been accumulated.
@@ -39,7 +39,7 @@ func (g *Grouper) Add(q parser.Quad) {
 		}
 		g.current = &Document{
 			ID:     q.Subject,
-			Fields: make(map[string][]string),
+			Fields: make(map[string][]interface{}),
 		}
 	}
 	key := strings.ReplaceAll(q.Predicate, ".", " ")
