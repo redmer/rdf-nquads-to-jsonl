@@ -1,6 +1,7 @@
 package parser_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/redmer/rdf-index-elasticsearch/parser"
@@ -115,8 +116,20 @@ func TestParseQuad(t *testing.T) {
 			wantSubj: "https://example.com/s",
 			wantPred: "https://example.com/p",
 			wantObj:  `He said "hello"`,
+		}, {
+			name:     "very long literal (1MB)",
+			line:     `<http://example.org/s> <http://example.org/p> "` + strings.Repeat("a", 1024*1024) + `" .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  strings.Repeat("a", 1024*1024),
 		},
-	}
+		{
+			name:     "very long URI",
+			line:     `<http://example.org/` + strings.Repeat("path/", 2000) + `s> <http://example.org/p> "val" .`,
+			wantSubj: "http://example.org/" + strings.Repeat("path/", 2000) + "s",
+			wantPred: "http://example.org/p",
+			wantObj:  "val",
+		}}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

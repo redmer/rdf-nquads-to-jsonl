@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"io"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/redmer/rdf-index-elasticsearch/parser"
 	"github.com/redmer/rdf-index-elasticsearch/processor"
@@ -26,26 +28,30 @@ func main() {
 		os.Stdout.Write(append(b, '\n'))
 	})
 
-	scanner := bufio.NewScanner(os.Stdin)
-	// Increase buffer size to handle long lines
-	const maxBuf = 1024 * 1024
-	buf := make([]byte, maxBuf)
-	scanner.Buffer(buf, maxBuf)
+	reader := bufio.NewReader(os.Stdin)
 
-	for scanner.Scan() {
+	for {
 		if indexErr != nil {
 			break
 		}
-		line := scanner.Text()
-		quad, err := parser.ParseQuad(line)
-		if err != nil {
-			// Skip unparseable lines (comments, empty lines, etc.)
-			continue
+		line, err := reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			log.Fatalf("reading stdin: %v", err)
 		}
-		grouper.Add(quad)
-	}
-	if err := scanner.Err(); err != nil {
-		log.Fatalf("reading stdin: %v", err)
+
+		line = strings.TrimSpace(line)
+		if len(line) > 0 {
+			quad, parseErr := parser.ParseQuad(line)
+			if parseErr != nil {
+				// Skip unparseable lines (comments, empty lines, etc.)
+			} else {
+				grouper.Add(quad)
+			}
+		}
+
+		if err == io.EOF {
+			break
+		}
 	}
 	if indexErr != nil {
 		log.Fatalf("indexing error: %v", indexErr)
