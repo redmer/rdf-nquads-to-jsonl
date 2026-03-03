@@ -2,44 +2,28 @@ package main
 
 import (
 	"bufio"
-	"context"
-	"fmt"
+	"encoding/json"
 	"log"
 	"os"
 
-	"github.com/redmer/rdf-index-elasticsearch/indexer"
 	"github.com/redmer/rdf-index-elasticsearch/parser"
 	"github.com/redmer/rdf-index-elasticsearch/processor"
 )
 
-const defaultBatchSize = 500
-
 func main() {
-	esURL := os.Getenv("ES_URL")
-	if esURL == "" {
-		esURL = "http://localhost:9200"
-	}
-	esIndex := os.Getenv("ES_INDEX")
-	if esIndex == "" {
-		log.Fatal("ES_INDEX environment variable is required")
-	}
-	esAPIKey := os.Getenv("ES_API_KEY")
-
-	idx, err := indexer.New(esURL, esIndex, esAPIKey, defaultBatchSize)
-	if err != nil {
-		log.Fatalf("create indexer: %v", err)
-	}
-
-	ctx := context.Background()
 	var indexErr error
 
 	grouper := processor.NewGrouper(func(doc processor.Document) {
 		if indexErr != nil {
 			return
 		}
-		if err := idx.Add(ctx, doc); err != nil {
-			indexErr = fmt.Errorf("index document %q: %w", doc.ID, err)
+		b, err := json.Marshal(doc)
+		if err != nil {
+			indexErr = err
+			return
 		}
+		// Write valid JSONL
+		os.Stdout.Write(append(b, '\n'))
 	})
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -69,9 +53,8 @@ func main() {
 
 	grouper.Flush()
 
-	if err := idx.Flush(ctx); err != nil {
-		log.Fatalf("final flush: %v", err)
+	// check if flush produced error
+	if indexErr != nil {
+		log.Fatalf("indexing error: %v", indexErr)
 	}
-
-	log.Println("Indexing complete.")
 }

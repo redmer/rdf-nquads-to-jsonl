@@ -1,6 +1,8 @@
 package processor_test
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/redmer/rdf-index-elasticsearch/parser"
@@ -83,5 +85,30 @@ func TestGrouperEmptyFlush(t *testing.T) {
 	g.Flush()
 	if len(docs) != 0 {
 		t.Errorf("expected 0 documents on empty flush, got %d", len(docs))
+	}
+}
+
+func TestDocumentMarshalJSON(t *testing.T) {
+	doc := processor.Document{
+		ID: "https://example.com/person/1",
+		Fields: map[string][]any{
+			"http://schema.org/name": {"Alice"},
+			"http://schema.org/age":  {"30"},
+		},
+	}
+
+	b, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("unexpected error marshaling document: %v", err)
+	}
+
+	got := string(b)
+	wantID := `"_id":"https://example.com/person/1"`
+	if !strings.Contains(got, wantID) {
+		t.Errorf("expected ID field %q, got: %s", wantID, got)
+	}
+	wantName := `"http://schema.org/name":["Alice"]`
+	if !strings.Contains(got, wantName) {
+		t.Errorf("expected name field %q, got: %s", wantName, got)
 	}
 }
