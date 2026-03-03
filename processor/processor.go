@@ -2,6 +2,7 @@
 package processor
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/redmer/rdf-index-elasticsearch/parser"
@@ -13,6 +14,16 @@ type Document struct {
 	ID string
 	// Fields maps predicate keys (dots replaced by spaces) to arrays of object values.
 	Fields map[string][]interface{}
+}
+
+// MarshalJSON flattens Fields into top-level keys and emits ID as "_id".
+func (d Document) MarshalJSON() ([]byte, error) {
+	out := make(map[string]interface{}, len(d.Fields)+1)
+	out["_id"] = d.ID
+	for k, v := range d.Fields {
+		out[k] = v
+	}
+	return json.Marshal(out)
 }
 
 // EmitFunc is called whenever a complete document has been accumulated.

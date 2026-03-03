@@ -2,7 +2,6 @@ package processor_test
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/redmer/rdf-index-elasticsearch/parser"
@@ -102,13 +101,37 @@ func TestDocumentMarshalJSON(t *testing.T) {
 		t.Fatalf("unexpected error marshaling document: %v", err)
 	}
 
-	got := string(b)
-	wantID := `"_id":"https://example.com/person/1"`
-	if !strings.Contains(got, wantID) {
-		t.Errorf("expected ID field %q, got: %s", wantID, got)
+	var got map[string]any
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("unexpected error unmarshaling marshaled document: %v", err)
 	}
-	wantName := `"http://schema.org/name":["Alice"]`
-	if !strings.Contains(got, wantName) {
-		t.Errorf("expected name field %q, got: %s", wantName, got)
+
+	if got["_id"] != "https://example.com/person/1" {
+		t.Fatalf("expected _id to be %q, got: %v", "https://example.com/person/1", got["_id"])
+	}
+
+	if _, ok := got["ID"]; ok {
+		t.Fatalf("did not expect key %q in marshaled output", "ID")
+	}
+	if _, ok := got["Fields"]; ok {
+		t.Fatalf("did not expect key %q in marshaled output", "Fields")
+	}
+
+	nameRaw, ok := got["http://schema.org/name"]
+	if !ok {
+		t.Fatalf("expected top-level key %q in marshaled output", "http://schema.org/name")
+	}
+	nameVals, ok := nameRaw.([]any)
+	if !ok || len(nameVals) != 1 || nameVals[0] != "Alice" {
+		t.Fatalf("unexpected value for key %q: %v", "http://schema.org/name", nameRaw)
+	}
+
+	ageRaw, ok := got["http://schema.org/age"]
+	if !ok {
+		t.Fatalf("expected top-level key %q in marshaled output", "http://schema.org/age")
+	}
+	ageVals, ok := ageRaw.([]any)
+	if !ok || len(ageVals) != 1 || ageVals[0] != "30" {
+		t.Fatalf("unexpected value for key %q: %v", "http://schema.org/age", ageRaw)
 	}
 }
