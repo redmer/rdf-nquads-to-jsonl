@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/redmer/rdf-index-elasticsearch/parser"
-	"github.com/redmer/rdf-index-elasticsearch/processor"
+	"github.com/redmer/rdf-nquads-to-jsonl/parser"
+	"github.com/redmer/rdf-nquads-to-jsonl/processor"
 )
 
 func TestGrouper(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/redmer/rdf-index-elasticsearch/parser"
+	"github.com/redmer/rdf-nquads-to-jsonl/parser"
 )
 
 // Document represents a single Elasticsearch document ready for indexing.

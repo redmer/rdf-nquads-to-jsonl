@@ -1,3 +1,3 @@
-module github.com/redmer/rdf-index-elasticsearch
+module github.com/redmer/rdf-nquads-to-jsonl
 
 go 1.25.6

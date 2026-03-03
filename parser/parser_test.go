@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/redmer/rdf-index-elasticsearch/parser"
+	"github.com/redmer/rdf-nquads-to-jsonl/parser"
 )
 
 func TestParseQuad(t *testing.T) {
