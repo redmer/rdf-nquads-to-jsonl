@@ -12,10 +12,11 @@ type Quad struct {
 	Subject   string
 	Predicate string
 	Object    interface{}
+	Graph     string
 }
 
 // ParseQuad parses a single N-Quad line and returns a Quad.
-// It ignores the graph IRI (fourth field) and the trailing dot.
+// It parses the graph IRI (fourth field) if present.
 // Returns an error for empty lines, comments, or malformed input.
 func ParseQuad(line string) (Quad, error) {
 	line = strings.TrimSpace(line)
@@ -41,12 +42,26 @@ func ParseQuad(line string) (Quad, error) {
 		return Quad{}, fmt.Errorf("predicate must be a URI, got %T", predVal)
 	}
 
-	obj, _, err := parseField(strings.TrimSpace(rest))
+	obj, rest, err := parseField(strings.TrimSpace(rest))
 	if err != nil {
 		return Quad{}, fmt.Errorf("object: %w", err)
 	}
 
-	return Quad{Subject: subj, Predicate: pred, Object: obj}, nil
+	rest = strings.TrimSpace(rest)
+	var graph string
+	// Check if there is a graph IRI (starts with '<')
+	if len(rest) > 0 && rest[0] == '<' {
+		graphVal, _, err := parseURI(rest)
+		if err != nil {
+			return Quad{}, fmt.Errorf("graph: %w", err)
+		}
+		graph, ok = graphVal.(string)
+		if !ok {
+			return Quad{}, fmt.Errorf("graph must be a URI, got %T", graphVal)
+		}
+	}
+
+	return Quad{Subject: subj, Predicate: pred, Object: obj, Graph: graph}, nil
 }
 
 // parseField reads one N-Quad field from s and returns the parsed value and the remainder.
