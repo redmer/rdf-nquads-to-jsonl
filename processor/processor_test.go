@@ -135,3 +135,63 @@ func TestDocumentMarshalJSON(t *testing.T) {
 		t.Fatalf("unexpected value for key %q: %v", "http://schema.org/age", ageRaw)
 	}
 }
+
+func TestGrouperWithGraph(t *testing.T) {
+	quad1 := parser.Quad{
+		Subject:   "https://example.com/s",
+		Predicate: "p",
+		Object:    "o1",
+		Graph:     "https://example.com/g1",
+	}
+	quad2 := parser.Quad{
+		Subject:   "https://example.com/s",
+		Predicate: "p",
+		Object:    "o2",
+		Graph:     "https://example.com/g2",
+	}
+	quad3 := parser.Quad{
+		Subject:   "https://example.com/s",
+		Predicate: "p",
+		Object:    "o3",
+		Graph:     "https://example.com/g1", // Duplicate graph
+	}
+
+	var docs []processor.Document
+	g := processor.NewGrouper(func(doc processor.Document) {
+		docs = append(docs, doc)
+	})
+	g.Add(quad1)
+	g.Add(quad2)
+	g.Add(quad3)
+	g.Flush()
+
+	if len(docs) != 1 {
+		t.Fatalf("docs count = %d, want 1", len(docs))
+	}
+	doc := docs[0]
+	if len(doc.Graphs) != 2 {
+		t.Errorf("len(doc.Graphs) = %d, want 2", len(doc.Graphs))
+	}
+	// Check content (order depends on insertion, which is predictable here: g1, then g2)
+	if doc.Graphs[0] != "https://example.com/g1" || doc.Graphs[1] != "https://example.com/g2" {
+		t.Errorf("Graphs = %v, want [g1, g2]", doc.Graphs)
+	}
+
+	b, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("MarshalJSON failed: %v", err)
+	}
+
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	graphs, ok := m["_graph"].([]interface{})
+	if !ok {
+		t.Errorf("_graph missing or not array: %v", m)
+	}
+	if len(graphs) != 2 {
+		t.Errorf("len(_graph) = %d, want 2", len(graphs))
+	}
+}

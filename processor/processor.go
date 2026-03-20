@@ -12,14 +12,19 @@ import (
 type Document struct {
 	// ID is the Subject URI used as the Elasticsearch document _id.
 	ID string
+	// Graphs is the list of graph URIs used as the Elasticsearch document _graph.
+	Graphs []string
 	// Fields maps predicate keys (dots replaced by spaces) to arrays of object values.
 	Fields map[string][]interface{}
 }
 
 // MarshalJSON flattens Fields into top-level keys and emits ID as "_id".
 func (d Document) MarshalJSON() ([]byte, error) {
-	out := make(map[string]interface{}, len(d.Fields)+1)
+	out := make(map[string]interface{}, len(d.Fields)+2)
 	out["_id"] = d.ID
+	if len(d.Graphs) > 0 {
+		out["_graph"] = d.Graphs
+	}
 	for k, v := range d.Fields {
 		out[k] = v
 	}
@@ -50,9 +55,24 @@ func (g *Grouper) Add(q parser.Quad) {
 		}
 		g.current = &Document{
 			ID:     q.Subject,
+			Graphs: []string{},
 			Fields: make(map[string][]interface{}),
 		}
 	}
+
+	if q.Graph != "" {
+		found := false
+		for _, graph := range g.current.Graphs {
+			if graph == q.Graph {
+				found = true
+				break
+			}
+		}
+		if !found {
+			g.current.Graphs = append(g.current.Graphs, q.Graph)
+		}
+	}
+
 	key := strings.ReplaceAll(q.Predicate, ".", " ")
 	g.current.Fields[key] = append(g.current.Fields[key], q.Object)
 }

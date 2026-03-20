@@ -9,40 +9,45 @@ import (
 
 func TestParseQuad(t *testing.T) {
 	tests := []struct {
-		name     string
-		line     string
-		wantSubj string
-		wantPred string
-		wantObj  interface{}
-		wantErr  bool
+		name      string
+		line      string
+		wantSubj  string
+		wantPred  string
+		wantObj   interface{}
+		wantGraph string
+		wantErr   bool
 	}{
 		{
-			name:     "URI object",
-			line:     `<https://example.com/person/123> <http://schema.org/knows> <https://example.com/person/456> <https://example.com/graph> .`,
-			wantSubj: "https://example.com/person/123",
-			wantPred: "http://schema.org/knows",
-			wantObj:  "https://example.com/person/456",
+			name:      "URI object",
+			line:      `<https://example.com/person/123> <http://schema.org/knows> <https://example.com/person/456> <https://example.com/graph> .`,
+			wantSubj:  "https://example.com/person/123",
+			wantPred:  "http://schema.org/knows",
+			wantObj:   "https://example.com/person/456",
+			wantGraph: "https://example.com/graph",
 		},
 		{
-			name:     "plain literal",
-			line:     `<https://example.com/person/123> <http://schema.org/name> "John Doe" <https://example.com/graph> .`,
-			wantSubj: "https://example.com/person/123",
-			wantPred: "http://schema.org/name",
-			wantObj:  "John Doe",
+			name:      "plain literal",
+			line:      `<https://example.com/person/123> <http://schema.org/name> "John Doe" <https://example.com/graph> .`,
+			wantSubj:  "https://example.com/person/123",
+			wantPred:  "http://schema.org/name",
+			wantObj:   "John Doe",
+			wantGraph: "https://example.com/graph",
 		},
 		{
-			name:     "literal with language tag",
-			line:     `<https://example.com/person/123> <http://schema.org/name> "John Doe"@en <https://example.com/graph> .`,
-			wantSubj: "https://example.com/person/123",
-			wantPred: "http://schema.org/name",
-			wantObj:  "John Doe",
+			name:      "literal with language tag",
+			line:      `<https://example.com/person/123> <http://schema.org/name> "John Doe"@en <https://example.com/graph> .`,
+			wantSubj:  "https://example.com/person/123",
+			wantPred:  "http://schema.org/name",
+			wantObj:   "John Doe",
+			wantGraph: "https://example.com/graph",
 		},
 		{
-			name:     "literal with datatype",
-			line:     `<https://example.com/person/123> <http://schema.org/age> "42"^^<http://www.w3.org/2001/XMLSchema#integer> <https://example.com/graph> .`,
-			wantSubj: "https://example.com/person/123",
-			wantPred: "http://schema.org/age",
-			wantObj:  int64(42),
+			name:      "literal with datatype",
+			line:      `<https://example.com/person/123> <http://schema.org/age> "42"^^<http://www.w3.org/2001/XMLSchema#integer> <https://example.com/graph> .`,
+			wantSubj:  "https://example.com/person/123",
+			wantPred:  "http://schema.org/age",
+			wantObj:   int64(42),
+			wantGraph: "https://example.com/graph",
 		},
 		{
 			name:     "no graph (triple format)",
@@ -151,6 +156,9 @@ func TestParseQuad(t *testing.T) {
 			}
 			if quad.Object != tt.wantObj {
 				t.Errorf("Object = %v, want %v", quad.Object, tt.wantObj)
+			}
+			if quad.Graph != tt.wantGraph {
+				t.Errorf("Graph = %q, want %q", quad.Graph, tt.wantGraph)
 			}
 		})
 	}
