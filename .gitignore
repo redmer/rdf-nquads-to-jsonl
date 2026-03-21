@@ -9,7 +9,8 @@
 *.dylib
 
 # Build output - the main binary
-rdf-index-elasticsearch
+rdf-nquads-to-jsonl
+rdf-nquads-to-jsonl.exe
 
 # Test binary, built with `go test -c`
 *.test
