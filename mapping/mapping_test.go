@@ -44,11 +44,8 @@ func TestMapper_Generate(t *testing.T) {
 		t.Fatalf("Invalid JSON: %v", err)
 	}
 
-	mappings, ok := result["mappings"].(map[string]interface{})
-	if !ok {
-		t.Fatal("Missing mappings key")
-	}
-	props, ok := mappings["properties"].(map[string]interface{})
+	// We expect the result to start with "properties" now.
+	props, ok := result["properties"].(map[string]interface{})
 	if !ok {
 		t.Fatal("Missing properties key")
 	}

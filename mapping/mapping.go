@@ -136,11 +136,11 @@ func (m *Mapper) Generate() ([]byte, error) {
 	}
 
 	// Wrap in standard ES mapping structure
-	// { "mappings": { "properties": { ... } } }
+	// { "properties": { ... } }
+	// We do NOT wrap this in "mappings" because tools like esbulk expect
+	// the mapping definition directly (which starts with "properties").
 	result := map[string]interface{}{
-		"mappings": map[string]interface{}{
-			"properties": properties,
-		},
+		"properties": properties,
 	}
 
 	return json.MarshalIndent(result, "", "  ")
