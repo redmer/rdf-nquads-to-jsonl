@@ -15,6 +15,7 @@ const (
 	TypeLong
 	TypeDouble
 	TypeText
+	TypeKeyword
 )
 
 // Mapper accumulates field types from N-Quads to generate an Elasticsearch mapping.
@@ -54,6 +55,8 @@ func inferType(obj interface{}) FieldType {
 		return TypeLong
 	case float32, float64:
 		return TypeDouble
+	case parser.URI:
+		return TypeKeyword
 	default:
 		return TypeText
 	}
@@ -105,6 +108,8 @@ func (m *Mapper) Generate() ([]byte, error) {
 			mapping = map[string]interface{}{"type": "long"}
 		case TypeDouble:
 			mapping = map[string]interface{}{"type": "double"}
+		case TypeKeyword:
+			mapping = map[string]interface{}{"type": "keyword"}
 		case TypeText:
 			mapping = map[string]interface{}{
 				"type": "text",

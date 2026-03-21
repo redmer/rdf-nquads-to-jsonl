@@ -22,7 +22,7 @@ func TestParseQuad(t *testing.T) {
 			line:      `<https://example.com/person/123> <http://schema.org/knows> <https://example.com/person/456> <https://example.com/graph> .`,
 			wantSubj:  "https://example.com/person/123",
 			wantPred:  "http://schema.org/knows",
-			wantObj:   "https://example.com/person/456",
+			wantObj:   parser.URI("https://example.com/person/456"),
 			wantGraph: "https://example.com/graph",
 		},
 		{

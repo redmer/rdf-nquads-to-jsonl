@@ -26,6 +26,14 @@ func TestMapper_Generate(t *testing.T) {
 	m.Add(parser.Quad{Predicate: "http://example.org/mixed_text", Object: int64(10)})
 	m.Add(parser.Quad{Predicate: "http://example.org/mixed_text", Object: "ten"})
 
+	// 7. URI Object -> Keyword
+	// We use ParseQuad to get the correct type from the parser (which should be distinct from string)
+	qURI, err := parser.ParseQuad(`<http://example.org/s> <http://example.org/ref> <http://example.org/obj> .`)
+	if err != nil {
+		t.Fatalf("ParseQuad failed: %v", err)
+	}
+	m.Add(qURI)
+
 	output, err := m.Generate()
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
@@ -55,6 +63,7 @@ func TestMapper_Generate(t *testing.T) {
 		{"http://example org/name", "text"},
 		{"http://example org/mixed_num", "double"},
 		{"http://example org/mixed_text", "text"},
+		{"http://example org/ref", "keyword"},
 		{"_graph", "keyword"},
 	}
 
