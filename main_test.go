@@ -51,7 +51,9 @@ func TestLongLines(t *testing.T) {
 			}()
 
 			// Run main logic
-			main()
+			if err := RunProcessor(); err != nil {
+				t.Fatalf("Processing failed: %v", err)
+			}
 
 			wOut.Close()
 			<-outDone
@@ -95,7 +97,9 @@ func TestMixedLineLengths(t *testing.T) {
 		close(outDone)
 	}()
 
-	main()
+	if err := RunProcessor(); err != nil {
+		t.Fatalf("Processing failed: %v", err)
+	}
 
 	wOut.Close()
 	<-outDone

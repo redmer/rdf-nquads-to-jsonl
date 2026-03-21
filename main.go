@@ -3,16 +3,67 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
+	"fmt"
 	"io"
 	"log"
 	"os"
 	"strings"
 
+	"github.com/redmer/rdf-nquads-to-jsonl/mapping"
 	"github.com/redmer/rdf-nquads-to-jsonl/parser"
 	"github.com/redmer/rdf-nquads-to-jsonl/processor"
 )
 
+var generateMapping = flag.Bool("generate-mapping", false, "Generate Elasticsearch mapping from input")
+
 func main() {
+	flag.Parse()
+
+	if *generateMapping {
+		if err := RunMapping(); err != nil {
+			log.Fatalf("mapping error: %v", err)
+		}
+	} else {
+		if err := RunProcessor(); err != nil {
+			log.Fatalf("processing error: %v", err)
+		}
+	}
+}
+
+func RunMapping() error {
+	mapper := mapping.NewMapper()
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return fmt.Errorf("reading stdin: %w", err)
+		}
+
+		line = strings.TrimSpace(line)
+		if len(line) > 0 {
+			quad, parseErr := parser.ParseQuad(line)
+			if parseErr == nil {
+				mapper.Add(quad)
+			}
+		}
+
+		if err == io.EOF {
+			break
+		}
+	}
+
+	result, err := mapper.Generate()
+	if err != nil {
+		return fmt.Errorf("generating mapping: %w", err)
+	}
+
+	_, err = os.Stdout.Write(result)
+	return err
+}
+
+func RunProcessor() error {
 	var indexErr error
 
 	grouper := processor.NewGrouper(func(doc processor.Document) {
@@ -36,15 +87,13 @@ func main() {
 		}
 		line, err := reader.ReadString('\n')
 		if err != nil && err != io.EOF {
-			log.Fatalf("reading stdin: %v", err)
+			return fmt.Errorf("reading stdin: %w", err)
 		}
 
 		line = strings.TrimSpace(line)
 		if len(line) > 0 {
 			quad, parseErr := parser.ParseQuad(line)
-			if parseErr != nil {
-				// Skip unparseable lines (comments, empty lines, etc.)
-			} else {
+			if parseErr == nil {
 				grouper.Add(quad)
 			}
 		}
@@ -53,14 +102,15 @@ func main() {
 			break
 		}
 	}
+
 	if indexErr != nil {
-		log.Fatalf("indexing error: %v", indexErr)
+		return indexErr
 	}
 
 	grouper.Flush()
 
-	// check if flush produced error
 	if indexErr != nil {
-		log.Fatalf("indexing error: %v", indexErr)
+		return indexErr
 	}
+	return nil
 }

@@ -15,6 +15,9 @@ type Quad struct {
 	Graph     string
 }
 
+// URI represents a resource identifier.
+type URI string
+
 // ParseQuad parses a single N-Quad line and returns a Quad.
 // It parses the graph IRI (fourth field) if present.
 // Returns an error for empty lines, comments, or malformed input.
@@ -28,8 +31,11 @@ func ParseQuad(line string) (Quad, error) {
 	if err != nil {
 		return Quad{}, fmt.Errorf("subject: %w", err)
 	}
-	subj, ok := subjVal.(string)
-	if !ok {
+	// Subject must be a URI
+	var subj string
+	if u, ok := subjVal.(URI); ok {
+		subj = string(u)
+	} else {
 		return Quad{}, fmt.Errorf("subject must be a URI, got %T", subjVal)
 	}
 
@@ -37,8 +43,11 @@ func ParseQuad(line string) (Quad, error) {
 	if err != nil {
 		return Quad{}, fmt.Errorf("predicate: %w", err)
 	}
-	pred, ok := predVal.(string)
-	if !ok {
+	// Predicate must be a URI
+	var pred string
+	if u, ok := predVal.(URI); ok {
+		pred = string(u)
+	} else {
 		return Quad{}, fmt.Errorf("predicate must be a URI, got %T", predVal)
 	}
 
@@ -55,8 +64,9 @@ func ParseQuad(line string) (Quad, error) {
 		if err != nil {
 			return Quad{}, fmt.Errorf("graph: %w", err)
 		}
-		graph, ok = graphVal.(string)
-		if !ok {
+		if u, ok := graphVal.(URI); ok {
+			graph = string(u)
+		} else {
 			return Quad{}, fmt.Errorf("graph must be a URI, got %T", graphVal)
 		}
 	}
@@ -89,7 +99,7 @@ func parseURI(s string) (value interface{}, rest string, err error) {
 	if end < 0 {
 		return nil, "", fmt.Errorf("unterminated URI: %q", s)
 	}
-	return s[1 : end+1], s[end+2:], nil
+	return URI(s[1 : end+1]), s[end+2:], nil
 }
 
 // parseLiteral reads a quoted literal and returns the unescaped string value plus the remainder.
@@ -148,7 +158,7 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 					if err != nil {
 						return nil, "", fmt.Errorf("datatype URI: %w", err)
 					}
-					datatype = uriVal.(string)
+					datatype = string(uriVal.(URI))
 				}
 			}
 
