@@ -16,6 +16,8 @@ import (
 )
 
 var generateMapping = flag.Bool("generate-mapping", false, "Generate Elasticsearch mapping from input")
+var includeGraphs = flag.String("include", "", "Comma-separated list of graph URIs to include (allowlist)")
+var excludeGraphs = flag.String("exclude", "", "Comma-separated list of graph URIs to exclude (blocklist)")
 
 func main() {
 	flag.Parse()
@@ -25,10 +27,23 @@ func main() {
 			log.Fatalf("mapping error: %v", err)
 		}
 	} else {
-		if err := RunProcessor(); err != nil {
+		includes := parseGraphList(*includeGraphs)
+		excludes := parseGraphList(*excludeGraphs)
+		if err := RunProcessor(includes, excludes); err != nil {
 			log.Fatalf("processing error: %v", err)
 		}
 	}
+}
+
+func parseGraphList(list string) map[string]bool {
+	res := make(map[string]bool)
+	if list == "" {
+		return res
+	}
+	for _, s := range strings.Split(list, ",") {
+		res[strings.TrimSpace(s)] = true
+	}
+	return res
 }
 
 func RunMapping() error {
@@ -63,7 +78,7 @@ func RunMapping() error {
 	return err
 }
 
-func RunProcessor() error {
+func RunProcessor(includes, excludes map[string]bool) error {
 	var indexErr error
 
 	grouper := processor.NewGrouper(func(doc processor.Document) {
@@ -94,6 +109,16 @@ func RunProcessor() error {
 		if len(line) > 0 {
 			quad, parseErr := parser.ParseQuad(line)
 			if parseErr == nil {
+				// Graph filter logic: by default, include all graphs.
+				if len(includes) > 0 {
+					if !includes[quad.Graph] {
+						continue
+					}
+				}
+				if excludes[quad.Graph] {
+					continue
+				}
+
 				grouper.Add(quad)
 			}
 		}
