@@ -14,6 +14,7 @@ const (
 	TypeBool
 	TypeLong
 	TypeDouble
+	TypeDate
 	TypeText
 	TypeKeyword
 )
@@ -55,6 +56,8 @@ func inferType(obj interface{}) FieldType {
 		return TypeLong
 	case float32, float64:
 		return TypeDouble
+	case parser.Date, parser.DateTime:
+		return TypeDate
 	case parser.URI:
 		return TypeKeyword
 	default:
@@ -108,6 +111,11 @@ func (m *Mapper) Generate() ([]byte, error) {
 			mapping = map[string]interface{}{"type": "long"}
 		case TypeDouble:
 			mapping = map[string]interface{}{"type": "double"}
+		case TypeDate:
+			mapping = map[string]interface{}{
+				"type":   "date",
+				"format": "strict_date_optional_time||strict_date",
+			}
 		case TypeKeyword:
 			mapping = map[string]interface{}{"type": "keyword"}
 		case TypeText:

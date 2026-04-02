@@ -116,6 +116,20 @@ func TestParseQuad(t *testing.T) {
 			wantObj:  123.0,
 		},
 		{
+			name:     "xsd:date",
+			line:     `<http://example.org/s> <http://example.org/p> "2024-01-31"^^<http://www.w3.org/2001/XMLSchema#date> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  parser.Date("2024-01-31"),
+		},
+		{
+			name:     "xsd:dateTime",
+			line:     `<http://example.org/s> <http://example.org/p> "2024-01-31T13:45:30Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  parser.DateTime("2024-01-31T13:45:30Z"),
+		},
+		{
 			name:     "literal with escaped quote",
 			line:     `<https://example.com/s> <https://example.com/p> "He said \"hello\"" .`,
 			wantSubj: "https://example.com/s",
