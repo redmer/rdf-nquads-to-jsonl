@@ -65,7 +65,8 @@ curl -sL https://datasets.crow.nl/crow/thesaurus/download.nq.gz | zcat | LC_ALL=
 A more typical example, sending to a ElasticSearch server with an API key:
 
 ```sh
-zcat data.nq.gz | LC_ALL=C sort | rdf-nquads-to-jsonl | esbulk -server http://localhost:9200 -index my-index2 -apikey '...' -id _id
+zcat data.nq.gz | LC_ALL=C sort | rdf-nquads-to-jsonl -generate-mapping > mapping.json
+zcat data.nq.gz | LC_ALL=C sort | rdf-nquads-to-jsonl | esbulk -server http://localhost:9200 -index my-index2 -apikey '...' -id _id -mapping mapping.json
 ```
 
 ## Document Format
@@ -84,7 +85,10 @@ Each Subject becomes one Elasticsearch document:
 - Predicate URIs are used as field keys with `.` replaced by ` ` (space) -- periods are special in ElasticSearch fields.
 - All values are arrays of strings.
 - Language-tagged strings become plain strings.
-- Numbers and boolean datatype become JSON numbers and booleans. All other strings with a datatype become plain strings.
+- Numbers and boolean datatype become JSON numbers and booleans.
+- `xsd:date`, `xsd:dateTime` literals are treated as dates for mapping generation.
+- `xsd:anyURI` literals are treated as keyword values for mapping generation.
+- All other strings with a datatype become plain strings.
 
 ## Development
 

@@ -25,6 +25,9 @@ type Date string
 // DateTime represents an xsd:dateTime literal.
 type DateTime string
 
+// AnyURI represents an xsd:anyURI literal.
+type AnyURI string
+
 // ParseQuad parses a single N-Quad line and returns a Quad.
 // It parses the graph IRI (fourth field) if present.
 // Returns an error for empty lines, comments, or malformed input.
@@ -201,6 +204,8 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 						return nil, "", err
 					}
 					return dt, rest, nil
+				case "http://www.w3.org/2001/XMLSchema#anyURI":
+					return AnyURI(rawVal), rest, nil
 				}
 			}
 
