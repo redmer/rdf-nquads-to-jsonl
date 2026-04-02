@@ -58,7 +58,7 @@ func inferType(obj interface{}) FieldType {
 		return TypeDouble
 	case parser.Date, parser.DateTime:
 		return TypeDate
-	case parser.URI:
+	case parser.URI, parser.AnyURI:
 		return TypeKeyword
 	default:
 		return TypeText

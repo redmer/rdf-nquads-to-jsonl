@@ -42,6 +42,9 @@ func TestMapper_Generate(t *testing.T) {
 	m.Add(parser.Quad{Predicate: "http://example.org/date_text_mixed", Object: parser.Date("2024-01-31")})
 	m.Add(parser.Quad{Predicate: "http://example.org/date_text_mixed", Object: "not-a-date"})
 
+	// 10. xsd:anyURI literal should map to keyword.
+	m.Add(parser.Quad{Predicate: "http://example.org/any_uri", Object: parser.AnyURI("https://example.org/resource")})
+
 	output, err := m.Generate()
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
@@ -69,6 +72,7 @@ func TestMapper_Generate(t *testing.T) {
 		{"http://example org/mixed_num", "double"},
 		{"http://example org/mixed_text", "text"},
 		{"http://example org/ref", "keyword"},
+		{"http://example org/any_uri", "keyword"},
 		{"http://example org/date_mixed", "date"},
 		{"http://example org/date_text_mixed", "text"},
 		{"_graph", "keyword"},

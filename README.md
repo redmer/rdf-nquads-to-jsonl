@@ -84,7 +84,9 @@ Each Subject becomes one Elasticsearch document:
 - Predicate URIs are used as field keys with `.` replaced by ` ` (space) -- periods are special in ElasticSearch fields.
 - All values are arrays of strings.
 - Language-tagged strings become plain strings.
-- Numbers and boolean datatype become JSON numbers and booleans. All other strings with a datatype become plain strings.
+- Numbers and boolean datatype become JSON numbers and booleans.
+- `xsd:anyURI` literals are treated as keyword values for mapping generation.
+- All other strings with a datatype become plain strings.
 
 ## Development
 
