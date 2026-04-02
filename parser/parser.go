@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Quad holds the parsed components of an N-Quad line.
@@ -17,6 +18,12 @@ type Quad struct {
 
 // URI represents a resource identifier.
 type URI string
+
+// Date represents an xsd:date literal.
+type Date string
+
+// DateTime represents an xsd:dateTime literal.
+type DateTime string
 
 // ParseQuad parses a single N-Quad line and returns a Quad.
 // It parses the graph IRI (fourth field) if present.
@@ -182,6 +189,18 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 						return nil, "", fmt.Errorf("invalid decimal: %q", rawVal)
 					}
 					return f, rest, nil
+				case "http://www.w3.org/2001/XMLSchema#date":
+					d, err := parseXSDDate(rawVal)
+					if err != nil {
+						return nil, "", err
+					}
+					return d, rest, nil
+				case "http://www.w3.org/2001/XMLSchema#dateTime":
+					dt, err := parseXSDDateTime(rawVal)
+					if err != nil {
+						return nil, "", err
+					}
+					return dt, rest, nil
 				}
 			}
 
@@ -192,4 +211,22 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 		i++
 	}
 	return nil, "", fmt.Errorf("unterminated literal: %q", s)
+}
+
+func parseXSDDate(v string) (Date, error) {
+	for _, layout := range []string{"2006-01-02", "2006-01-02Z07:00"} {
+		if _, err := time.Parse(layout, v); err == nil {
+			return Date(v), nil
+		}
+	}
+	return "", fmt.Errorf("invalid date: %q", v)
+}
+
+func parseXSDDateTime(v string) (DateTime, error) {
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05", "2006-01-02T15:04:05.999999999"} {
+		if _, err := time.Parse(layout, v); err == nil {
+			return DateTime(v), nil
+		}
+	}
+	return "", fmt.Errorf("invalid dateTime: %q", v)
 }
