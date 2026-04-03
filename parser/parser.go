@@ -28,6 +28,11 @@ type DateTime string
 // AnyURI represents an xsd:anyURI literal.
 type AnyURI string
 
+// LangString represents a literal that had an RDF language tag (e.g. "hello"@en).
+// It intentionally keeps only the lexical value while preserving that language-tagged
+// provenance for downstream mapping heuristics.
+type LangString string
+
 // ParseQuad parses a single N-Quad line and returns a Quad.
 // It parses the graph IRI (fourth field) if present.
 // Returns an error for empty lines, comments, or malformed input.
@@ -150,7 +155,9 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 			var datatype string
 
 			// Consume optional @lang or ^^<datatype>
+			hasLangTag := false
 			if strings.HasPrefix(rest, "@") {
+				hasLangTag = true
 				// consume up to next whitespace
 				end := strings.IndexAny(rest, " \t")
 				if end < 0 {
@@ -207,6 +214,10 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 				case "http://www.w3.org/2001/XMLSchema#anyURI":
 					return AnyURI(rawVal), rest, nil
 				}
+			}
+
+			if hasLangTag {
+				return LangString(rawVal), rest, nil
 			}
 
 			return rawVal, rest, nil

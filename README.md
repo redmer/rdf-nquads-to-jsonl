@@ -88,6 +88,8 @@ Each Subject becomes one Elasticsearch document:
 - Numbers and boolean datatype become JSON numbers and booleans.
 - `xsd:date`, `xsd:dateTime` literals are treated as dates for mapping generation.
 - `xsd:anyURI` literals are treated as keyword values for mapping generation.
+- Language-tagged literals (e.g. `"label"@en`) are treated as text values for mapping generation.
+- Plain string literals are inferred per field: long or mixed-content fields map to `text`, while consistently short values (with enough samples) can map to `keyword`.
 - All other strings with a datatype become plain strings.
 
 ## Development

@@ -45,6 +45,15 @@ func TestMapper_Generate(t *testing.T) {
 	// 10. xsd:anyURI literal should map to keyword.
 	m.Add(parser.Quad{Predicate: "http://example.org/any_uri", Object: parser.AnyURI("https://example.org/resource")})
 
+	// 11. Short literal codes with enough samples should map to keyword.
+	for _, code := range []string{"A1", "B2", "C3", "D4", "E5"} {
+		m.Add(parser.Quad{Predicate: "http://example.org/code", Object: code})
+	}
+
+	// 12. Language-tagged literals should map to text.
+	m.Add(parser.Quad{Predicate: "http://example.org/description", Object: parser.LangString("Korte omschrijving")})
+	m.Add(parser.Quad{Predicate: "http://example.org/description", Object: parser.LangString("Lange beschrijving")})
+
 	output, err := m.Generate()
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
@@ -73,6 +82,8 @@ func TestMapper_Generate(t *testing.T) {
 		{"http://example org/mixed_text", "text"},
 		{"http://example org/ref", "keyword"},
 		{"http://example org/any_uri", "keyword"},
+		{"http://example org/code", "keyword"},
+		{"http://example org/description", "text"},
 		{"http://example org/date_mixed", "date"},
 		{"http://example org/date_text_mixed", "text"},
 		{"_graph", "keyword"},
@@ -91,6 +102,12 @@ func TestMapper_Generate(t *testing.T) {
 		}
 		if gotType != tt.want {
 			t.Errorf("Field %s: got type %s, want %s", tt.field, gotType, tt.want)
+		}
+
+		if gotType == "text" {
+			if _, hasFields := fieldMap["fields"]; hasFields {
+				t.Errorf("Field %s: text field should not have a keyword subfield", tt.field)
+			}
 		}
 	}
 }

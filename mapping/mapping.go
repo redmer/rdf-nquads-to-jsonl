@@ -21,14 +21,23 @@ const (
 
 // Mapper accumulates field types from N-Quads to generate an Elasticsearch mapping.
 type Mapper struct {
-	// fields maps the JSON property name (predicate) to the detected field type.
-	fields map[string]FieldType
+	// fields maps the JSON property name (predicate) to the detected field profile.
+	fields map[string]*fieldProfile
+}
+
+type fieldProfile struct {
+	baseType FieldType
+
+	stringCount     int
+	stringTotalLen  int
+	stringMaxLen    int
+	langStringCount int
 }
 
 // NewMapper creates a new Mapper.
 func NewMapper() *Mapper {
 	return &Mapper{
-		fields: make(map[string]FieldType),
+		fields: make(map[string]*fieldProfile),
 	}
 }
 
@@ -37,31 +46,49 @@ func (m *Mapper) Add(q parser.Quad) {
 	// Transform predicate to JSON key (same logic as processor)
 	key := strings.ReplaceAll(q.Predicate, ".", " ")
 
-	newType := inferType(q.Object)
-	currentType, exists := m.fields[key]
-
+	profile, exists := m.fields[key]
 	if !exists {
-		m.fields[key] = newType
-	} else {
-		m.fields[key] = resolveType(currentType, newType)
+		profile = &fieldProfile{baseType: TypeUnknown}
+		m.fields[key] = profile
+	}
+
+	newType, hasStringLike, isLangString, stringLen := inferType(q.Object)
+
+	if hasStringLike {
+		profile.stringCount++
+		profile.stringTotalLen += stringLen
+		if stringLen > profile.stringMaxLen {
+			profile.stringMaxLen = stringLen
+		}
+		if isLangString {
+			profile.langStringCount++
+		}
+	}
+
+	if newType != TypeUnknown {
+		profile.baseType = resolveType(profile.baseType, newType)
 	}
 }
 
 // inferType determines the FieldType from a Go value.
-func inferType(obj interface{}) FieldType {
-	switch obj.(type) {
+func inferType(obj interface{}) (fieldType FieldType, hasStringLike bool, isLangString bool, stringLen int) {
+	switch obj := obj.(type) {
 	case bool:
-		return TypeBool
+		return TypeBool, false, false, 0
 	case int, int64:
-		return TypeLong
+		return TypeLong, false, false, 0
 	case float32, float64:
-		return TypeDouble
+		return TypeDouble, false, false, 0
 	case parser.Date, parser.DateTime:
-		return TypeDate
+		return TypeDate, false, false, 0
 	case parser.URI, parser.AnyURI:
-		return TypeKeyword
+		return TypeKeyword, false, false, 0
+	case parser.LangString:
+		return TypeUnknown, true, true, len(obj)
+	case string:
+		return TypeUnknown, true, false, len(obj)
 	default:
-		return TypeText
+		return TypeUnknown, false, false, 0
 	}
 }
 
@@ -70,15 +97,14 @@ func resolveType(t1, t2 FieldType) FieldType {
 	if t1 == t2 {
 		return t1
 	}
-	if t1 == TypeText || t2 == TypeText {
-		return TypeText
-	}
-	// If one is Unknown (shouldn't happen if initialized properly), take the other.
 	if t1 == TypeUnknown {
 		return t2
 	}
 	if t2 == TypeUnknown {
 		return t1
+	}
+	if t1 == TypeText || t2 == TypeText {
+		return TypeText
 	}
 
 	// Mixed numeric types upgrade to Double.
@@ -87,6 +113,31 @@ func resolveType(t1, t2 FieldType) FieldType {
 	}
 
 	// Any other mix (e.g. Bool + Long) falls back to Text for safety.
+	return TypeText
+}
+
+func inferStringFieldType(profile *fieldProfile) FieldType {
+	if profile.stringCount == 0 {
+		return TypeUnknown
+	}
+
+	// Language-tagged literals are almost always natural language and should be analyzed.
+	if profile.langStringCount > 0 {
+		return TypeText
+	}
+
+	avgLen := float64(profile.stringTotalLen) / float64(profile.stringCount)
+
+	// Favor text by default to avoid accidentally classifying natural language as keyword.
+	if avgLen >= 20 || profile.stringMaxLen > 128 {
+		return TypeText
+	}
+
+	// Only infer keyword for consistently short literals when there is enough evidence.
+	if profile.stringCount >= 5 && avgLen <= 10 && profile.stringMaxLen <= 32 {
+		return TypeKeyword
+	}
+
 	return TypeText
 }
 
@@ -102,8 +153,15 @@ func (m *Mapper) Generate() ([]byte, error) {
 		"type": "keyword",
 	}
 
-	for field, fieldType := range m.fields {
+	for field, profile := range m.fields {
 		var mapping map[string]interface{}
+
+		fieldType := profile.baseType
+		stringType := inferStringFieldType(profile)
+		if stringType != TypeUnknown {
+			fieldType = resolveType(fieldType, stringType)
+		}
+
 		switch fieldType {
 		case TypeBool:
 			mapping = map[string]interface{}{"type": "boolean"}
@@ -119,26 +177,10 @@ func (m *Mapper) Generate() ([]byte, error) {
 		case TypeKeyword:
 			mapping = map[string]interface{}{"type": "keyword"}
 		case TypeText:
-			mapping = map[string]interface{}{
-				"type": "text",
-				"fields": map[string]interface{}{
-					"keyword": map[string]interface{}{
-						"type":         "keyword",
-						"ignore_above": 256,
-					},
-				},
-			}
+			mapping = map[string]interface{}{"type": "text"}
 		default:
 			// Fallback
-			mapping = map[string]interface{}{
-				"type": "text",
-				"fields": map[string]interface{}{
-					"keyword": map[string]interface{}{
-						"type":         "keyword",
-						"ignore_above": 256,
-					},
-				},
-			}
+			mapping = map[string]interface{}{"type": "text"}
 		}
 		properties[field] = mapping
 	}
