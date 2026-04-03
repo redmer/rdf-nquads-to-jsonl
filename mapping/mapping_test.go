@@ -54,6 +54,16 @@ func TestMapper_Generate(t *testing.T) {
 	m.Add(parser.Quad{Predicate: "http://example.org/description", Object: parser.LangString("Korte omschrijving")})
 	m.Add(parser.Quad{Predicate: "http://example.org/description", Object: parser.LangString("Lange beschrijving")})
 
+	// 13. rdf:HTML should map to text with html_strip analyzer.
+	m.Add(parser.Quad{Predicate: "http://example.org/html", Object: parser.RDFHTML("<p>Hello</p>")})
+
+	// 14. geosparql literals should map to geo_shape.
+	m.Add(parser.Quad{Predicate: "http://example.org/wkt", Object: parser.GeoWKT("POINT (30 10)")})
+	m.Add(parser.Quad{Predicate: "http://example.org/geojson", Object: parser.GeoJSON(`{"type":"Point","coordinates":[30,10]}`)})
+
+	// 15. Triply markdown datatype should map to text.
+	m.Add(parser.Quad{Predicate: "http://example.org/markdown", Object: parser.TriplyMarkdown("# Title")})
+
 	output, err := m.Generate()
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
@@ -84,6 +94,10 @@ func TestMapper_Generate(t *testing.T) {
 		{"http://example org/any_uri", "keyword"},
 		{"http://example org/code", "keyword"},
 		{"http://example org/description", "text"},
+		{"http://example org/html", "text"},
+		{"http://example org/wkt", "geo_shape"},
+		{"http://example org/geojson", "geo_shape"},
+		{"http://example org/markdown", "text"},
 		{"http://example org/date_mixed", "date"},
 		{"http://example org/date_text_mixed", "text"},
 		{"_graph", "keyword"},
@@ -107,6 +121,15 @@ func TestMapper_Generate(t *testing.T) {
 		if gotType == "text" {
 			if _, hasFields := fieldMap["fields"]; hasFields {
 				t.Errorf("Field %s: text field should not have a keyword subfield", tt.field)
+			}
+		}
+
+		if tt.field == "http://example org/html" {
+			gotAnalyzer, ok := fieldMap["analyzer"].(string)
+			if !ok {
+				t.Errorf("Field %s: expected analyzer for rdf:HTML mapping", tt.field)
+			} else if gotAnalyzer != "html_strip" {
+				t.Errorf("Field %s: got analyzer %s, want html_strip", tt.field, gotAnalyzer)
 			}
 		}
 	}
