@@ -125,11 +125,8 @@ func TestMapper_Generate(t *testing.T) {
 		}
 
 		if tt.field == "http://example org/html" {
-			gotAnalyzer, ok := fieldMap["analyzer"].(string)
-			if !ok {
-				t.Errorf("Field %s: expected analyzer for rdf:HTML mapping", tt.field)
-			} else if gotAnalyzer != "html_strip" {
-				t.Errorf("Field %s: got analyzer %s, want html_strip", tt.field, gotAnalyzer)
+			if gotAnalyzer, hasAnalyzer := fieldMap["analyzer"].(string); hasAnalyzer {
+				t.Errorf("Field %s: rdf:HTML field should not set a custom analyzer, got %s", tt.field, gotAnalyzer)
 			}
 		}
 	}
