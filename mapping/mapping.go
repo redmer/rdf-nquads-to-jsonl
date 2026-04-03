@@ -296,8 +296,6 @@ func (m *Mapper) Generate() ([]byte, error) {
 			mapping = map[string]interface{}{"type": "text"}
 			if m.textAnalyzer != "" {
 				mapping["analyzer"] = m.textAnalyzer
-			} else if profile.hasRDFHTML {
-				mapping["analyzer"] = "html_strip"
 			} else if analyzer := inferAnalyzer(profile); analyzer != "" {
 				mapping["analyzer"] = analyzer
 			}
