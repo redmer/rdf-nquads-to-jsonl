@@ -2,6 +2,7 @@
 package parser
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -31,7 +32,27 @@ type AnyURI string
 // LangString represents a literal that had an RDF language tag (e.g. "hello"@en).
 // It intentionally keeps only the lexical value while preserving that language-tagged
 // provenance for downstream mapping heuristics.
-type LangString string
+type LangString struct {
+	Value string
+	Lang  string
+}
+
+// MarshalJSON emits a language-tagged literal as its lexical string value.
+func (ls LangString) MarshalJSON() ([]byte, error) {
+	return json.Marshal(ls.Value)
+}
+
+// BaseLang returns a normalized primary language subtag (e.g. "en" for "en-GB").
+func (ls LangString) BaseLang() string {
+	tag := strings.ToLower(strings.TrimSpace(ls.Lang))
+	if tag == "" {
+		return ""
+	}
+	if i := strings.IndexAny(tag, "-_"); i >= 0 {
+		tag = tag[:i]
+	}
+	return tag
+}
 
 // ParseQuad parses a single N-Quad line and returns a Quad.
 // It parses the graph IRI (fourth field) if present.
@@ -156,13 +177,16 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 
 			// Consume optional @lang or ^^<datatype>
 			hasLangTag := false
+			langTag := ""
 			if strings.HasPrefix(rest, "@") {
 				hasLangTag = true
 				// consume up to next whitespace
 				end := strings.IndexAny(rest, " \t")
 				if end < 0 {
+					langTag = strings.TrimPrefix(rest, "@")
 					rest = ""
 				} else {
+					langTag = strings.TrimPrefix(rest[:end], "@")
 					rest = rest[end:]
 				}
 			} else if strings.HasPrefix(rest, "^^") {
@@ -217,7 +241,7 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 			}
 
 			if hasLangTag {
-				return LangString(rawVal), rest, nil
+				return LangString{Value: rawVal, Lang: langTag}, rest, nil
 			}
 
 			return rawVal, rest, nil

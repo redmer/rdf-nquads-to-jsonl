@@ -38,7 +38,7 @@ func TestParseQuad(t *testing.T) {
 			line:      `<https://example.com/person/123> <http://schema.org/name> "John Doe"@en <https://example.com/graph> .`,
 			wantSubj:  "https://example.com/person/123",
 			wantPred:  "http://schema.org/name",
-			wantObj:   parser.LangString("John Doe"),
+			wantObj:   parser.LangString{Value: "John Doe", Lang: "en"},
 			wantGraph: "https://example.com/graph",
 		},
 		{

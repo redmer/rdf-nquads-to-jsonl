@@ -18,6 +18,7 @@ import (
 var generateMapping = flag.Bool("generate-mapping", false, "Generate Elasticsearch mapping from input")
 var includeGraphs = flag.String("include", "", "Comma-separated list of graph URIs to include (allowlist)")
 var excludeGraphs = flag.String("exclude", "", "Comma-separated list of graph URIs to exclude (blocklist)")
+var textAnalyzer = flag.String("text-analyzer", "", "Elasticsearch analyzer to apply to inferred text fields (overrides language-based inference)")
 
 func main() {
 	flag.Parse()
@@ -48,6 +49,7 @@ func parseGraphList(list string) map[string]bool {
 
 func RunMapping() error {
 	mapper := mapping.NewMapper()
+	mapper.SetTextAnalyzer(*textAnalyzer)
 	reader := bufio.NewReader(os.Stdin)
 
 	for {

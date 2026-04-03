@@ -27,6 +27,8 @@ Usage of rdf-nquads-to-jsonl:
         Generate Elasticsearch mapping from input
   -include string
         Comma-separated list of graph URIs to include (allowlist)
+  -text-analyzer string
+    Elasticsearch analyzer to apply to inferred text fields (overrides language-based inference)
 ```
 
 Demonstrating output: downloading a Gzipped NQuads file, unzipping, sorting and sending colorizing output to less:
@@ -89,6 +91,8 @@ Each Subject becomes one Elasticsearch document:
 - `xsd:date`, `xsd:dateTime` literals are treated as dates for mapping generation.
 - `xsd:anyURI` literals are treated as keyword values for mapping generation.
 - Language-tagged literals (e.g. `"label"@en`) are treated as text values for mapping generation.
+- For language-tagged text fields, mapping generation picks the best matching Elasticsearch analyzer from observed language tags (for example `@nl` -> `dutch`).
+- Use `-text-analyzer` to force a specific analyzer for all inferred `text` fields. Set it to the empty string to turn off all text analyzer inference.
 - Plain string literals are inferred per field: long or mixed-content fields map to `text`, while consistently short values (with enough samples) can map to `keyword`.
 - All other strings with a datatype become plain strings.
 

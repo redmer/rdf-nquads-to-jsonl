@@ -51,8 +51,8 @@ func TestMapper_Generate(t *testing.T) {
 	}
 
 	// 12. Language-tagged literals should map to text.
-	m.Add(parser.Quad{Predicate: "http://example.org/description", Object: parser.LangString("Korte omschrijving")})
-	m.Add(parser.Quad{Predicate: "http://example.org/description", Object: parser.LangString("Lange beschrijving")})
+	m.Add(parser.Quad{Predicate: "http://example.org/description", Object: parser.LangString{Value: "Korte omschrijving", Lang: "nl"}})
+	m.Add(parser.Quad{Predicate: "http://example.org/description", Object: parser.LangString{Value: "Lange beschrijving", Lang: "nl-NL"}})
 
 	output, err := m.Generate()
 	if err != nil {
@@ -108,6 +108,54 @@ func TestMapper_Generate(t *testing.T) {
 			if _, hasFields := fieldMap["fields"]; hasFields {
 				t.Errorf("Field %s: text field should not have a keyword subfield", tt.field)
 			}
+		}
+	}
+
+	descriptionMap, ok := props["http://example org/description"].(map[string]interface{})
+	if !ok {
+		t.Fatal("description field missing")
+	}
+	analyzer, ok := descriptionMap["analyzer"].(string)
+	if !ok {
+		t.Fatalf("description analyzer missing or not string: %v", descriptionMap["analyzer"])
+	}
+	if analyzer != "dutch" {
+		t.Fatalf("description analyzer = %q, want %q", analyzer, "dutch")
+	}
+}
+
+func TestMapper_Generate_WithForcedTextAnalyzer(t *testing.T) {
+	m := mapping.NewMapper()
+	m.SetTextAnalyzer("standard")
+
+	m.Add(parser.Quad{Predicate: "http://example.org/name", Object: "Alice Wonderland"})
+	m.Add(parser.Quad{Predicate: "http://example.org/description", Object: parser.LangString{Value: "Een voorbeeld", Lang: "nl"}})
+
+	output, err := m.Generate()
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("Invalid JSON: %v", err)
+	}
+
+	props, ok := result["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Missing properties key")
+	}
+
+	for _, field := range []string{"http://example org/name", "http://example org/description"} {
+		fieldMap, ok := props[field].(map[string]interface{})
+		if !ok {
+			t.Fatalf("Field %s missing", field)
+		}
+		if gotType, _ := fieldMap["type"].(string); gotType != "text" {
+			t.Fatalf("Field %s type = %q, want text", field, gotType)
+		}
+		if analyzer, _ := fieldMap["analyzer"].(string); analyzer != "standard" {
+			t.Fatalf("Field %s analyzer = %q, want standard", field, analyzer)
 		}
 	}
 }
