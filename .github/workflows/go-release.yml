@@ -1,0 +1,71 @@
+name: Go module release
+
+"on":
+    push:
+        tags:
+            - "v*"
+
+permissions:
+    contents: write
+
+jobs:
+    validate-and-release:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Set up Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version-file: go.mod
+
+            - name: Validate tag and module major version compatibility
+              env:
+                  TAG: ${{ github.ref_name }}
+              run: |
+                  set -euo pipefail
+
+                  if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+                    echo "Tag '$TAG' must follow semantic version format vMAJOR.MINOR.PATCH"
+                    exit 1
+                  fi
+
+                  major="${BASH_REMATCH[1]}"
+                  module_path="$(go list -m -f '{{.Path}}')"
+
+                  if (( major == 0 )); then
+                    echo "Major version v0 is not supported by this release workflow."
+                    echo "Use v1+ tags only."
+                    exit 1
+                  fi
+
+                  if (( major == 1 )); then
+                    if [[ "$module_path" =~ /v[0-9]+$ ]]; then
+                      echo "v1 module tags require no /vN suffix in go.mod module path."
+                      echo "Current module path: $module_path"
+                      exit 1
+                    fi
+                  fi
+
+                  if (( major >= 2 )); then
+                    if [[ ! "$module_path" =~ /v${major}$ ]]; then
+                      echo "Tag '$TAG' requires module path to end with '/v${major}'."
+                      echo "Current module path: $module_path"
+                      echo "Update go.mod module path before tagging v${major}.x.y"
+                      exit 1
+                    fi
+                  fi
+
+                  echo "Tag and module path are compatible."
+
+            - name: Run tests
+              run: go test ./...
+
+            - name: Create GitHub release
+              uses: softprops/action-gh-release@v2
+              with:
+                  generate_release_notes: true
