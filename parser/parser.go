@@ -2,6 +2,7 @@
 package parser
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -27,6 +28,43 @@ type DateTime string
 
 // AnyURI represents an xsd:anyURI literal.
 type AnyURI string
+
+// RDFHTML represents an rdf:HTML literal.
+type RDFHTML string
+
+// GeoWKT represents a geosparql:wktLiteral literal.
+type GeoWKT string
+
+// GeoJSON represents a geosparql:geoJSONLiteral literal.
+type GeoJSON string
+
+// TriplyMarkdown represents a Triply markdown literal.
+type TriplyMarkdown string
+
+// LangString represents a literal that had an RDF language tag (e.g. "hello"@en).
+// It intentionally keeps only the lexical value while preserving that language-tagged
+// provenance for downstream mapping heuristics.
+type LangString struct {
+	Value string
+	Lang  string
+}
+
+// MarshalJSON emits a language-tagged literal as its lexical string value.
+func (ls LangString) MarshalJSON() ([]byte, error) {
+	return json.Marshal(ls.Value)
+}
+
+// BaseLang returns a normalized primary language subtag (e.g. "en" for "en-GB").
+func (ls LangString) BaseLang() string {
+	tag := strings.ToLower(strings.TrimSpace(ls.Lang))
+	if tag == "" {
+		return ""
+	}
+	if i := strings.IndexAny(tag, "-_"); i >= 0 {
+		tag = tag[:i]
+	}
+	return tag
+}
 
 // ParseQuad parses a single N-Quad line and returns a Quad.
 // It parses the graph IRI (fourth field) if present.
@@ -150,12 +188,17 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 			var datatype string
 
 			// Consume optional @lang or ^^<datatype>
+			hasLangTag := false
+			langTag := ""
 			if strings.HasPrefix(rest, "@") {
+				hasLangTag = true
 				// consume up to next whitespace
 				end := strings.IndexAny(rest, " \t")
 				if end < 0 {
+					langTag = strings.TrimPrefix(rest, "@")
 					rest = ""
 				} else {
+					langTag = strings.TrimPrefix(rest[:end], "@")
 					rest = rest[end:]
 				}
 			} else if strings.HasPrefix(rest, "^^") {
@@ -174,6 +217,8 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 
 			if datatype != "" {
 				switch datatype {
+				case "http://www.w3.org/1999/02/22-rdf-syntax-ns#HTML":
+					return RDFHTML(rawVal), rest, nil
 				case "http://www.w3.org/2001/XMLSchema#boolean":
 					b, err := strconv.ParseBool(rawVal)
 					if err != nil {
@@ -206,7 +251,17 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 					return dt, rest, nil
 				case "http://www.w3.org/2001/XMLSchema#anyURI":
 					return AnyURI(rawVal), rest, nil
+				case "http://www.opengis.net/ont/geosparql#wktLiteral":
+					return GeoWKT(rawVal), rest, nil
+				case "http://www.opengis.net/ont/geosparql#geoJSONLiteral":
+					return GeoJSON(rawVal), rest, nil
+				case "https://triplydb.com/Triply/vocab/def/markdown":
+					return TriplyMarkdown(rawVal), rest, nil
 				}
+			}
+
+			if hasLangTag {
+				return LangString{Value: rawVal, Lang: langTag}, rest, nil
 			}
 
 			return rawVal, rest, nil

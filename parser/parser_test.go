@@ -38,7 +38,7 @@ func TestParseQuad(t *testing.T) {
 			line:      `<https://example.com/person/123> <http://schema.org/name> "John Doe"@en <https://example.com/graph> .`,
 			wantSubj:  "https://example.com/person/123",
 			wantPred:  "http://schema.org/name",
-			wantObj:   "John Doe",
+			wantObj:   parser.LangString{Value: "John Doe", Lang: "en"},
 			wantGraph: "https://example.com/graph",
 		},
 		{
@@ -135,6 +135,34 @@ func TestParseQuad(t *testing.T) {
 			wantSubj: "http://example.org/s",
 			wantPred: "http://example.org/p",
 			wantObj:  parser.AnyURI("https://example.org/resource"),
+		},
+		{
+			name:     "rdf:HTML",
+			line:     `<http://example.org/s> <http://example.org/p> "<p>Hello</p>"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#HTML> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  parser.RDFHTML("<p>Hello</p>"),
+		},
+		{
+			name:     "geosparql:wktLiteral",
+			line:     `<http://example.org/s> <http://example.org/p> "POINT (30 10)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  parser.GeoWKT("POINT (30 10)"),
+		},
+		{
+			name:     "geosparql:geoJSONLiteral",
+			line:     `<http://example.org/s> <http://example.org/p> "{\"type\":\"Point\",\"coordinates\":[30,10]}"^^<http://www.opengis.net/ont/geosparql#geoJSONLiteral> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  parser.GeoJSON(`{"type":"Point","coordinates":[30,10]}`),
+		},
+		{
+			name:     "Triply markdown datatype",
+			line:     `<http://example.org/s> <http://example.org/p> "# Heading"^^<https://triplydb.com/Triply/vocab/def/markdown> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  parser.TriplyMarkdown("# Heading"),
 		},
 		{
 			name:     "literal with escaped quote",
