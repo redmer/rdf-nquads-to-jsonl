@@ -17,6 +17,7 @@ const (
 	TypeDate
 	TypeText
 	TypeKeyword
+	TypeGeoShape
 )
 
 // Mapper accumulates field types from N-Quads to generate an Elasticsearch mapping.
@@ -36,6 +37,7 @@ type fieldProfile struct {
 	stringMaxLen    int
 	langStringCount int
 	langCounts      map[string]int
+	hasRDFHTML      bool
 }
 
 // NewMapper creates a new Mapper.
@@ -61,7 +63,7 @@ func (m *Mapper) Add(q parser.Quad) {
 		m.fields[key] = profile
 	}
 
-	newType, hasStringLike, lang, stringLen := inferType(q.Object)
+	newType, hasStringLike, lang, isRDFHTML, stringLen := inferType(q.Object)
 
 	if hasStringLike {
 		profile.stringCount++
@@ -76,6 +78,9 @@ func (m *Mapper) Add(q parser.Quad) {
 			}
 			profile.langCounts[lang]++
 		}
+		if isRDFHTML {
+			profile.hasRDFHTML = true
+		}
 	}
 
 	if newType != TypeUnknown {
@@ -84,24 +89,30 @@ func (m *Mapper) Add(q parser.Quad) {
 }
 
 // inferType determines the FieldType from a Go value.
-func inferType(obj interface{}) (fieldType FieldType, hasStringLike bool, lang string, stringLen int) {
+func inferType(obj interface{}) (fieldType FieldType, hasStringLike bool, lang string, isRDFHTML bool, stringLen int) {
 	switch obj := obj.(type) {
 	case bool:
-		return TypeBool, false, "", 0
+		return TypeBool, false, "", false, 0
 	case int, int64:
-		return TypeLong, false, "", 0
+		return TypeLong, false, "", false, 0
 	case float32, float64:
-		return TypeDouble, false, "", 0
+		return TypeDouble, false, "", false, 0
 	case parser.Date, parser.DateTime:
-		return TypeDate, false, "", 0
+		return TypeDate, false, "", false, 0
 	case parser.URI, parser.AnyURI:
-		return TypeKeyword, false, "", 0
+		return TypeKeyword, false, "", false, 0
+	case parser.GeoWKT, parser.GeoJSON:
+		return TypeGeoShape, false, "", false, 0
+	case parser.TriplyMarkdown:
+		return TypeText, true, "", false, len(obj)
+	case parser.RDFHTML:
+		return TypeText, true, "", true, len(obj)
 	case parser.LangString:
-		return TypeUnknown, true, obj.BaseLang(), len(obj.Value)
+		return TypeUnknown, true, obj.BaseLang(), false, len(obj.Value)
 	case string:
-		return TypeUnknown, true, "", len(obj)
+		return TypeUnknown, true, "", false, len(obj)
 	default:
-		return TypeUnknown, false, "", 0
+		return TypeUnknown, false, "", false, 0
 	}
 }
 
@@ -190,6 +201,19 @@ func resolveType(t1, t2 FieldType) FieldType {
 		return TypeText
 	}
 
+	if t1 == TypeGeoShape || t2 == TypeGeoShape {
+		if t1 == TypeUnknown {
+			return t2
+		}
+		if t2 == TypeUnknown {
+			return t1
+		}
+		if t1 == TypeGeoShape && t2 == TypeGeoShape {
+			return TypeGeoShape
+		}
+		return TypeText
+	}
+
 	// Mixed numeric types upgrade to Double.
 	if (t1 == TypeLong && t2 == TypeDouble) || (t1 == TypeDouble && t2 == TypeLong) {
 		return TypeDouble
@@ -259,10 +283,14 @@ func (m *Mapper) Generate() ([]byte, error) {
 			}
 		case TypeKeyword:
 			mapping = map[string]interface{}{"type": "keyword"}
+		case TypeGeoShape:
+			mapping = map[string]interface{}{"type": "geo_shape"}
 		case TypeText:
 			mapping = map[string]interface{}{"type": "text"}
 			if m.textAnalyzer != "" {
 				mapping["analyzer"] = m.textAnalyzer
+			} else if profile.hasRDFHTML {
+				mapping["analyzer"] = "html_strip"
 			} else if analyzer := inferAnalyzer(profile); analyzer != "" {
 				mapping["analyzer"] = analyzer
 			}

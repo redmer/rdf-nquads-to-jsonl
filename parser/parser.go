@@ -29,6 +29,18 @@ type DateTime string
 // AnyURI represents an xsd:anyURI literal.
 type AnyURI string
 
+// RDFHTML represents an rdf:HTML literal.
+type RDFHTML string
+
+// GeoWKT represents a geosparql:wktLiteral literal.
+type GeoWKT string
+
+// GeoJSON represents a geosparql:geoJSONLiteral literal.
+type GeoJSON string
+
+// TriplyMarkdown represents a Triply markdown literal.
+type TriplyMarkdown string
+
 // LangString represents a literal that had an RDF language tag (e.g. "hello"@en).
 // It intentionally keeps only the lexical value while preserving that language-tagged
 // provenance for downstream mapping heuristics.
@@ -205,6 +217,8 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 
 			if datatype != "" {
 				switch datatype {
+				case "http://www.w3.org/1999/02/22-rdf-syntax-ns#HTML":
+					return RDFHTML(rawVal), rest, nil
 				case "http://www.w3.org/2001/XMLSchema#boolean":
 					b, err := strconv.ParseBool(rawVal)
 					if err != nil {
@@ -237,6 +251,12 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 					return dt, rest, nil
 				case "http://www.w3.org/2001/XMLSchema#anyURI":
 					return AnyURI(rawVal), rest, nil
+				case "http://www.opengis.net/ont/geosparql#wktLiteral":
+					return GeoWKT(rawVal), rest, nil
+				case "http://www.opengis.net/ont/geosparql#geoJSONLiteral":
+					return GeoJSON(rawVal), rest, nil
+				case "https://triplydb.com/Triply/vocab/def/markdown":
+					return TriplyMarkdown(rawVal), rest, nil
 				}
 			}
 
