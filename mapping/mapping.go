@@ -134,7 +134,7 @@ func inferStringFieldType(profile *fieldProfile) FieldType {
 	}
 
 	// Only infer keyword for consistently short literals when there is enough evidence.
-	if profile.stringCount >= 5 && avgLen <= 10 && profile.stringMaxLen <= 32 {
+	if profile.stringCount >= 5 && avgLen <= 16 && profile.stringMaxLen <= 32 {
 		return TypeKeyword
 	}
 
