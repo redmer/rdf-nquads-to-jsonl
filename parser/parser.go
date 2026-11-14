@@ -38,8 +38,8 @@ type GeoWKT string
 // GeoJSON represents a geosparql:geoJSONLiteral literal.
 type GeoJSON string
 
-// TriplyMarkdown represents a Triply markdown literal.
-type TriplyMarkdown string
+// Markdown represents a Markdown literal.
+type Markdown string
 
 // LangString represents a literal that had an RDF language tag (e.g. "hello"@en).
 // It intentionally keeps only the lexical value while preserving that language-tagged
@@ -256,7 +256,9 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 				case "http://www.opengis.net/ont/geosparql#geoJSONLiteral":
 					return GeoJSON(rawVal), rest, nil
 				case "https://triplydb.com/Triply/vocab/def/markdown":
-					return TriplyMarkdown(rawVal), rest, nil
+					return Markdown(rawVal), rest, nil
+				case "http://ns.ontowiki.net/SysOnt/Markdown":
+					return Markdown(rawVal), rest, nil
 				}
 			}
 

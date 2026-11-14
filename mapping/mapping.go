@@ -103,7 +103,7 @@ func inferType(obj interface{}) (fieldType FieldType, hasStringLike bool, lang s
 		return TypeKeyword, false, "", false, 0
 	case parser.GeoWKT, parser.GeoJSON:
 		return TypeGeoShape, false, "", false, 0
-	case parser.TriplyMarkdown:
+	case parser.Markdown:
 		return TypeText, true, "", false, len(obj)
 	case parser.RDFHTML:
 		return TypeText, true, "", true, len(obj)
