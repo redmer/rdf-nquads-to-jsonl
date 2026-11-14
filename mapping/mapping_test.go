@@ -61,8 +61,8 @@ func TestMapper_Generate(t *testing.T) {
 	m.Add(parser.Quad{Predicate: "http://example.org/wkt", Object: parser.GeoWKT("POINT (30 10)")})
 	m.Add(parser.Quad{Predicate: "http://example.org/geojson", Object: parser.GeoJSON(`{"type":"Point","coordinates":[30,10]}`)})
 
-	// 15. Triply markdown datatype should map to text.
-	m.Add(parser.Quad{Predicate: "http://example.org/markdown", Object: parser.TriplyMarkdown("# Title")})
+	// 15. Markdown datatype should map to text.
+	m.Add(parser.Quad{Predicate: "http://example.org/markdown", Object: parser.Markdown("# Title")})
 
 	output, err := m.Generate()
 	if err != nil {

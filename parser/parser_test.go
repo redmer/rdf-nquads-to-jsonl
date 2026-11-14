@@ -162,7 +162,14 @@ func TestParseQuad(t *testing.T) {
 			line:     `<http://example.org/s> <http://example.org/p> "# Heading"^^<https://triplydb.com/Triply/vocab/def/markdown> .`,
 			wantSubj: "http://example.org/s",
 			wantPred: "http://example.org/p",
-			wantObj:  parser.TriplyMarkdown("# Heading"),
+			wantObj:  parser.Markdown("# Heading"),
+		},
+		{
+			name:     "Ontowiki markdown datatype",
+			line:     `<http://example.org/s> <http://example.org/p> "# Heading"^^<http://ns.ontowiki.net/SysOnt/Markdown> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  parser.Markdown("# Heading"),
 		},
 		{
 			name:     "literal with escaped quote",
