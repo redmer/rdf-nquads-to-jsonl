@@ -45,7 +45,9 @@ type GeoJSON string
 // value. Anything else falls back to a plain string.
 func (g GeoJSON) MarshalJSON() ([]byte, error) {
 	var v map[string]interface{}
-	if err := json.Unmarshal([]byte(g), &v); err == nil {
+	// A lexical "null" unmarshals successfully into a nil map; treat that as
+	// not-a-JSON-object so it falls back to a plain string.
+	if err := json.Unmarshal([]byte(g), &v); err == nil && v != nil {
 		return json.Marshal(v)
 	}
 	return json.Marshal(string(g))

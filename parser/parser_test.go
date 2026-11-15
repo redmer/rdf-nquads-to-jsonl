@@ -281,6 +281,11 @@ func TestGeoJSONMarshalJSON(t *testing.T) {
 			input:   parser.GeoJSON(`[1,2,3]`),
 			wantStr: "[1,2,3]",
 		},
+		{
+			name:    "JSON null is not an object, stays a string",
+			input:   parser.GeoJSON(`null`),
+			wantStr: "null",
+		},
 	}
 
 	for _, tt := range tests {
