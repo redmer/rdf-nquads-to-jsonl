@@ -3,7 +3,9 @@ package parser
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +39,17 @@ type GeoWKT string
 
 // GeoJSON represents a geosparql:geoJSONLiteral literal.
 type GeoJSON string
+
+// MarshalJSON emits a geoJSONLiteral as a JSON object when its lexical form is
+// a valid JSON object, so Elasticsearch geo_shape fields receive a structured
+// value. Anything else falls back to a plain string.
+func (g GeoJSON) MarshalJSON() ([]byte, error) {
+	var v map[string]interface{}
+	if err := json.Unmarshal([]byte(g), &v); err == nil {
+		return json.Marshal(v)
+	}
+	return json.Marshal(string(g))
+}
 
 // Markdown represents a Markdown literal.
 type Markdown string
@@ -228,6 +241,13 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 				case "http://www.w3.org/2001/XMLSchema#integer", "http://www.w3.org/2001/XMLSchema#int":
 					n, err := strconv.ParseInt(rawVal, 10, 64)
 					if err != nil {
+						if errors.Is(err, strconv.ErrRange) {
+							// Out of int64 range: fall back to float64, then to the lexical string.
+							if f, ferr := strconv.ParseFloat(rawVal, 64); ferr == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
+								return f, rest, nil
+							}
+							return rawVal, rest, nil
+						}
 						return nil, "", fmt.Errorf("invalid integer: %q", rawVal)
 					}
 					return n, rest, nil
@@ -235,6 +255,10 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 					f, err := strconv.ParseFloat(rawVal, 64)
 					if err != nil {
 						return nil, "", fmt.Errorf("invalid decimal: %q", rawVal)
+					}
+					// JSON cannot represent NaN or Infinity; keep the lexical form as a string.
+					if math.IsNaN(f) || math.IsInf(f, 0) {
+						return rawVal, rest, nil
 					}
 					return f, rest, nil
 				case "http://www.w3.org/2001/XMLSchema#date":
