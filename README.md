@@ -26,7 +26,7 @@ Usage of rdf-nquads-to-jsonl:
   -generate-mapping
         Generate Elasticsearch mapping from input
   -id-max-bytes int
-        Maximum byte length of emitted document _id values; longer Subject URIs are truncated with a SHA-256 suffix (default 512)
+        Maximum byte length of emitted document _id values; longer Subject URIs are truncated with a SHA-256 suffix. Must be 0 (disabled) or at least 65 bytes (default 512)
   -include string
         Comma-separated list of graph URIs to include (allowlist)
   -text-analyzer string
@@ -85,14 +85,14 @@ Each Subject becomes one Elasticsearch document:
 }
 ```
 
-- The `_id` is the Subject URI. Elasticsearch rejects `_id` values longer than 512 bytes, so longer Subject URIs are truncated to fit: the first `max-65` bytes are kept, followed by `-` and the 64-character hex SHA-256 of the full URI. Use `-id-max-bytes` to change the limit; `0` disables it.
+- The `_id` is the Subject URI. Elasticsearch rejects `_id` values longer than 512 bytes, so longer Subject URIs are truncated to fit: the first `max-65` bytes are kept (cut at a UTF-8 rune boundary), followed by `-` and the 64-character hex SHA-256 of the full URI. Use `-id-max-bytes` to change the limit; `0` disables it. Values between 1 and 64 are rejected at startup, because they would truncate the SHA-256 suffix itself and make distinct long subjects collide.
 - Predicate URIs are used as field keys with `.` replaced by ` ` (space) -- periods are special in ElasticSearch fields.
 - All values are arrays of strings.
 - Language-tagged strings become plain strings.
 - Numbers and boolean datatype become JSON numbers and booleans.
 - `xsd:date`, `xsd:dateTime` literals are treated as dates for mapping generation.
 - `xsd:anyURI` literals are treated as keyword values for mapping generation.
-- `rdf:HTML` literals map to `text` with `html_strip` analyzer.
+- `rdf:HTML` literals map to `text` with the `html_strip` analyzer; the generated mapping defines that custom analyzer under `settings.analysis.analyzer.html_strip` (HTML char filter + standard tokenizer).
 - `geosparql:wktLiteral` and `geosparql:geoJSONLiteral` map to `geo_shape`.
 - Markdown literals map to `text`. Recognized datatypes:
   - `http://ns.ontowiki.net/SysOnt/Markdown`
