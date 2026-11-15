@@ -169,6 +169,53 @@ func TestMapper_Generate(t *testing.T) {
 	if analyzer != "dutch" {
 		t.Fatalf("description analyzer = %q, want %q", analyzer, "dutch")
 	}
+
+	// The html field references the html_strip analyzer, so the generated
+	// mapping must define it under settings.analysis.analyzer.
+	settings, ok := result["settings"].(map[string]interface{})
+	if !ok {
+		t.Fatal("settings key missing: html_strip analyzer must be defined")
+	}
+	analysis, ok := settings["analysis"].(map[string]interface{})
+	if !ok {
+		t.Fatal("settings.analysis missing")
+	}
+	analyzers, ok := analysis["analyzer"].(map[string]interface{})
+	if !ok {
+		t.Fatal("settings.analysis.analyzer missing")
+	}
+	htmlStrip, ok := analyzers["html_strip"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("html_strip analyzer not defined, got: %v", analyzers)
+	}
+	if htmlStrip["type"] != "custom" {
+		t.Errorf("html_strip type = %v, want custom", htmlStrip["type"])
+	}
+	charFilters, ok := htmlStrip["char_filter"].([]interface{})
+	if !ok || len(charFilters) != 1 || charFilters[0] != "html_strip" {
+		t.Errorf("html_strip char_filter = %v, want [html_strip]", htmlStrip["char_filter"])
+	}
+	if htmlStrip["tokenizer"] != "standard" {
+		t.Errorf("html_strip tokenizer = %v, want standard", htmlStrip["tokenizer"])
+	}
+}
+
+func TestMapper_Generate_NoHTMLNoSettings(t *testing.T) {
+	m := mapping.NewMapper()
+	m.Add(parser.Quad{Predicate: "http://example.org/name", Object: "Alice"})
+
+	output, err := m.Generate()
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("Invalid JSON: %v", err)
+	}
+	if _, ok := result["settings"]; ok {
+		t.Errorf("settings should not be emitted when no field uses the html_strip analyzer: %v", result["settings"])
+	}
 }
 
 func TestMapper_Generate_WithForcedTextAnalyzer(t *testing.T) {

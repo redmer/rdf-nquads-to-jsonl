@@ -258,6 +258,7 @@ func inferStringFieldType(profile *fieldProfile) FieldType {
 // Generate produces the Elasticsearch mapping JSON.
 func (m *Mapper) Generate() ([]byte, error) {
 	properties := make(map[string]interface{})
+	usesHTMLStrip := false
 
 	// Always map _id and _graph
 	// _id is metadata, doesn't go in 'properties' usually, but outputting it
@@ -297,6 +298,7 @@ func (m *Mapper) Generate() ([]byte, error) {
 			switch {
 			case profile.hasRDFHTML:
 				mapping["analyzer"] = "html_strip"
+				usesHTMLStrip = true
 			case m.textAnalyzer != "":
 				mapping["analyzer"] = m.textAnalyzer
 			default:
@@ -335,6 +337,22 @@ func (m *Mapper) Generate() ([]byte, error) {
 			},
 		},
 		"properties": properties,
+	}
+
+	// rdf:HTML fields reference the html_strip analyzer, so the mapping must
+	// define it: a custom analyzer using the built-in html_strip char filter.
+	if usesHTMLStrip {
+		result["settings"] = map[string]interface{}{
+			"analysis": map[string]interface{}{
+				"analyzer": map[string]interface{}{
+					"html_strip": map[string]interface{}{
+						"type":        "custom",
+						"char_filter": []interface{}{"html_strip"},
+						"tokenizer":   "standard",
+					},
+				},
+			},
+		}
 	}
 
 	return json.MarshalIndent(result, "", "  ")
