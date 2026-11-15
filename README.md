@@ -25,6 +25,8 @@ Usage of rdf-nquads-to-jsonl:
         Comma-separated list of graph URIs to exclude (blocklist)
   -generate-mapping
         Generate Elasticsearch mapping from input
+  -id-max-bytes int
+        Maximum byte length of emitted document _id values; longer Subject URIs are truncated with a SHA-256 suffix (default 512)
   -include string
         Comma-separated list of graph URIs to include (allowlist)
   -text-analyzer string
@@ -83,7 +85,7 @@ Each Subject becomes one Elasticsearch document:
 }
 ```
 
-- The `_id` is the Subject URI.
+- The `_id` is the Subject URI. Elasticsearch rejects `_id` values longer than 512 bytes, so longer Subject URIs are truncated to fit: the first `max-65` bytes are kept, followed by `-` and the 64-character hex SHA-256 of the full URI. Use `-id-max-bytes` to change the limit; `0` disables it.
 - Predicate URIs are used as field keys with `.` replaced by ` ` (space) -- periods are special in ElasticSearch fields.
 - All values are arrays of strings.
 - Language-tagged strings become plain strings.
@@ -98,7 +100,8 @@ Each Subject becomes one Elasticsearch document:
   - If there're more Markdown datatypes, please open an issue.
 - Language-tagged literals (e.g. `"label"@en`) are treated as text values for mapping generation.
 - For language-tagged text fields, mapping generation picks the best matching Elasticsearch analyzer from observed language tags (for example `@nl` -> `dutch`).
-- Use `-text-analyzer` to force a specific analyzer for all inferred `text` fields. Set it to the empty string to turn off all text analyzer inference.
+- Use `-text-analyzer` to force a specific analyzer for all inferred `text` fields (except `rdf:HTML`, which always uses `html_strip`). Set it to the empty string to turn off all text analyzer inference.
+- The generated mapping includes a `dynamic_templates` rule that maps any dynamically added string fields to `keyword`, so ad-hoc string fields stay exactly searchable instead of being analyzed `text`.
 - Plain string literals are inferred per field: long or mixed-content fields map to `text`, while consistently short values (with enough samples) can map to `keyword`.
 - All other strings with a datatype become plain strings.
 
