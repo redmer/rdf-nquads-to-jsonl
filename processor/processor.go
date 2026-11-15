@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/redmer/rdf-nquads-to-jsonl/parser"
 )
@@ -33,12 +32,9 @@ func protectID(id string, maxBytes int) string {
 	sum := sha256.Sum256([]byte(id))
 	digest := hex.EncodeToString(sum[:])
 	prefixLen := maxBytes - MinMaxIDBytes
-	// Truncate at a UTF-8 rune boundary so JSON marshaling cannot replace a
-	// partial rune with U+FFFD and inflate the _id past the limit.
-	for prefixLen > 0 && !utf8.RuneStart(id[prefixLen]) {
-		prefixLen--
-	}
-	return id[:prefixLen] + "-" + digest
+	// Drop any partial UTF-8 rune at the cut so JSON marshaling cannot replace
+	// it with U+FFFD and inflate the _id past the limit.
+	return strings.ToValidUTF8(id[:prefixLen], "") + "-" + digest
 }
 
 // Document represents a single Elasticsearch document ready for indexing.
