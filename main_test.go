@@ -160,9 +160,9 @@ func TestFiltering(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-// Redirect stdin
-oldStdin := os.Stdin
-r, w, _ := os.Pipe()
+			// Redirect stdin
+			oldStdin := os.Stdin
+			r, w, _ := os.Pipe()
 			os.Stdin = r
 			go func() {
 				w.Write([]byte(input))
@@ -217,5 +217,61 @@ r, w, _ := os.Pipe()
 				}
 			}
 		})
+	}
+}
+
+// TestLongSubjectIDProtection verifies that subject URIs longer than the
+// Elasticsearch _id limit (512 bytes) are truncated with a SHA-256 suffix.
+func TestLongSubjectIDProtection(t *testing.T) {
+	longSubject := "<http://example.org/" + strings.Repeat("a", 1000) + ">"
+	input := longSubject + ` <http://example.org/p> "val" .` + "\n"
+
+	oldStdin := os.Stdin
+	r, w, _ := os.Pipe()
+	os.Stdin = r
+	go func() {
+		w.Write([]byte(input))
+		w.Close()
+	}()
+
+	oldStdout := os.Stdout
+	rOut, wOut, _ := os.Pipe()
+	os.Stdout = wOut
+
+	var buf bytes.Buffer
+	outDone := make(chan struct{})
+	go func() {
+		buf.ReadFrom(rOut)
+		close(outDone)
+	}()
+
+	oldMax := *idMaxBytes
+	*idMaxBytes = 512
+	defer func() { *idMaxBytes = oldMax }()
+
+	if err := RunProcessor(nil, nil); err != nil {
+		t.Fatalf("Processing failed: %v", err)
+	}
+
+	wOut.Close()
+	<-outDone
+	os.Stdin = oldStdin
+	os.Stdout = oldStdout
+
+	line := strings.TrimSpace(buf.String())
+	if line == "" {
+		t.Fatal("no output produced")
+	}
+	var doc struct {
+		ID string `json:"_id"`
+	}
+	if err := json.Unmarshal([]byte(line), &doc); err != nil {
+		t.Fatalf("Invalid JSON output: %v", err)
+	}
+	if len(doc.ID) > 512 {
+		t.Errorf("_id length = %d bytes, want <= 512", len(doc.ID))
+	}
+	if doc.ID == "http://example.org/"+strings.Repeat("a", 1000) {
+		t.Errorf("_id was not protected, expected truncation with hash suffix")
 	}
 }

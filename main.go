@@ -19,6 +19,7 @@ var generateMapping = flag.Bool("generate-mapping", false, "Generate Elasticsear
 var includeGraphs = flag.String("include", "", "Comma-separated list of graph URIs to include (allowlist)")
 var excludeGraphs = flag.String("exclude", "", "Comma-separated list of graph URIs to exclude (blocklist)")
 var textAnalyzer = flag.String("text-analyzer", "", "Elasticsearch analyzer to apply to inferred text fields (overrides language-based inference)")
+var idMaxBytes = flag.Int("id-max-bytes", processor.DefaultMaxIDBytes, "Maximum byte length of emitted document _id values; longer Subject URIs are truncated with a SHA-256 suffix. 0 disables the limit")
 
 func main() {
 	flag.Parse()
@@ -95,6 +96,7 @@ func RunProcessor(includes, excludes map[string]bool) error {
 		// Write valid JSONL
 		os.Stdout.Write(append(b, '\n'))
 	})
+	grouper.SetMaxIDBytes(*idMaxBytes)
 
 	reader := bufio.NewReader(os.Stdin)
 

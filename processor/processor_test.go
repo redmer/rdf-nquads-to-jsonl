@@ -2,6 +2,7 @@ package processor_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/redmer/rdf-nquads-to-jsonl/parser"
@@ -193,5 +194,87 @@ func TestGrouperWithGraph(t *testing.T) {
 	}
 	if len(graphs) != 2 {
 		t.Errorf("len(_graph) = %d, want 2", len(graphs))
+	}
+}
+
+func TestGrouperLongSubjectID(t *testing.T) {
+	longSubject := "http://example.org/" + strings.Repeat("a", 1000)
+	quad := parser.Quad{Subject: longSubject, Predicate: "http://example.org/p", Object: "val"}
+
+	var docs []processor.Document
+	g := processor.NewGrouper(func(doc processor.Document) {
+		docs = append(docs, doc)
+	})
+	g.Add(quad)
+	g.Flush()
+
+	if len(docs) != 1 {
+		t.Fatalf("expected 1 document, got %d", len(docs))
+	}
+	id := docs[0].ID
+	if len(id) > processor.DefaultMaxIDBytes {
+		t.Errorf("ID length = %d bytes, want <= %d", len(id), processor.DefaultMaxIDBytes)
+	}
+	if !strings.HasPrefix(id, longSubject[:processor.DefaultMaxIDBytes-65]) {
+		t.Errorf("ID should start with the truncated subject prefix, got %q...", id[:40])
+	}
+	// Deterministic: same input yields the same protected ID
+	var docs2 []processor.Document
+	g2 := processor.NewGrouper(func(doc processor.Document) { docs2 = append(docs2, doc) })
+	g2.Add(quad)
+	g2.Flush()
+	if docs2[0].ID != id {
+		t.Errorf("protectID not deterministic: %q vs %q", docs2[0].ID, id)
+	}
+}
+
+func TestGrouperIDLimitDisabled(t *testing.T) {
+	longSubject := "http://example.org/" + strings.Repeat("a", 1000)
+	quad := parser.Quad{Subject: longSubject, Predicate: "http://example.org/p", Object: "val"}
+
+	var docs []processor.Document
+	g := processor.NewGrouper(func(doc processor.Document) {
+		docs = append(docs, doc)
+	})
+	g.SetMaxIDBytes(0)
+	g.Add(quad)
+	g.Flush()
+
+	if docs[0].ID != longSubject {
+		t.Errorf("with limit disabled, ID = %q..., want the full subject", docs[0].ID[:40])
+	}
+}
+
+func TestGrouperShortSubjectUnchanged(t *testing.T) {
+	quad := parser.Quad{Subject: "http://example.org/s", Predicate: "http://example.org/p", Object: "val"}
+	var docs []processor.Document
+	g := processor.NewGrouper(func(doc processor.Document) { docs = append(docs, doc) })
+	g.Add(quad)
+	g.Flush()
+	if docs[0].ID != "http://example.org/s" {
+		t.Errorf("short subject ID = %q, want unchanged", docs[0].ID)
+	}
+}
+
+func TestGrouperLongSubjectsStillGrouped(t *testing.T) {
+	// Two long subjects that share a long common prefix but differ at the end
+	// must still be emitted as two separate documents.
+	subj1 := "http://example.org/" + strings.Repeat("a", 1000) + "1"
+	subj2 := "http://example.org/" + strings.Repeat("a", 1000) + "2"
+	quads := []parser.Quad{
+		{Subject: subj1, Predicate: "p", Object: "o1"},
+		{Subject: subj2, Predicate: "p", Object: "o2"},
+	}
+	var docs []processor.Document
+	g := processor.NewGrouper(func(doc processor.Document) { docs = append(docs, doc) })
+	for _, q := range quads {
+		g.Add(q)
+	}
+	g.Flush()
+	if len(docs) != 2 {
+		t.Fatalf("expected 2 documents, got %d", len(docs))
+	}
+	if docs[0].ID == docs[1].ID {
+		t.Errorf("distinct subjects collapsed to the same _id %q", docs[0].ID)
 	}
 }
