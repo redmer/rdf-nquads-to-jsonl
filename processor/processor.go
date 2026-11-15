@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/redmer/rdf-nquads-to-jsonl/parser"
 )
@@ -14,26 +15,29 @@ import (
 // Elasticsearch rejects _id values longer than 512 bytes.
 const DefaultMaxIDBytes = 512
 
+// MinMaxIDBytes is the smallest useful -id-max-bytes value: room for the '-'
+// separator plus the full 64-character hex SHA-256 digest. Smaller positive
+// values would truncate the digest itself, making distinct long subjects
+// collide, so they are rejected in main.
+const MinMaxIDBytes = 1 + 64
+
 // protectID returns id unchanged when it fits within maxBytes. Otherwise it
 // returns a deterministic, collision-resistant value that fits: a truncated
 // prefix of the id followed by "-" and the hex SHA-256 of the full id, kept
-// within the byte budget. maxBytes <= 0 means no limit.
+// within the byte budget. maxBytes <= 0 means no limit; otherwise maxBytes
+// must be >= MinMaxIDBytes so the digest is never truncated.
 func protectID(id string, maxBytes int) string {
 	if maxBytes <= 0 || len(id) <= maxBytes {
 		return id
 	}
 	sum := sha256.Sum256([]byte(id))
 	digest := hex.EncodeToString(sum[:])
-	// suffix = "-" + digest
-	suffixLen := 1 + len(digest)
-	if maxBytes <= suffixLen {
-		// Not enough room for a prefix; use the digest alone (truncated if needed).
-		if maxBytes >= len(digest) {
-			return digest
-		}
-		return digest[:maxBytes]
+	prefixLen := maxBytes - MinMaxIDBytes
+	// Truncate at a UTF-8 rune boundary so JSON marshaling cannot replace a
+	// partial rune with U+FFFD and inflate the _id past the limit.
+	for prefixLen > 0 && !utf8.RuneStart(id[prefixLen]) {
+		prefixLen--
 	}
-	prefixLen := maxBytes - suffixLen
 	return id[:prefixLen] + "-" + digest
 }
 

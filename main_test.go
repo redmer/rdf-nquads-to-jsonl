@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -217,6 +218,45 @@ func TestFiltering(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestIDMaxBytesTooSmallRejected verifies that a positive -id-max-bytes
+// below the minimum useful limit is rejected instead of truncating the
+// SHA-256 digest (which would make distinct long subjects collide).
+func TestIDMaxBytesTooSmallRejected(t *testing.T) {
+	oldMax := *idMaxBytes
+	defer func() { *idMaxBytes = oldMax }()
+
+	for _, v := range []int{-1, 1, 64} {
+		*idMaxBytes = v
+		if err := RunProcessor(nil, nil); err == nil {
+			t.Errorf("RunProcessor with -id-max-bytes=%d: expected error, got nil", v)
+		}
+	}
+
+	// 0 (disabled) and the minimum must be accepted.
+	for _, v := range []int{0, 65, 512} {
+		*idMaxBytes = v
+		oldStdin := os.Stdin
+		r, w, _ := os.Pipe()
+		os.Stdin = r
+		go func() {
+			w.Write([]byte("<http://ex.org/s> <http://ex.org/p> \"o\" .\n"))
+			w.Close()
+		}()
+		oldStdout := os.Stdout
+		rOut, wOut, _ := os.Pipe()
+		os.Stdout = wOut
+		go func() {
+			io.Copy(io.Discard, rOut)
+		}()
+		if err := RunProcessor(nil, nil); err != nil {
+			t.Errorf("RunProcessor with -id-max-bytes=%d: unexpected error: %v", v, err)
+		}
+		wOut.Close()
+		os.Stdin = oldStdin
+		os.Stdout = oldStdout
 	}
 }
 

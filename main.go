@@ -19,7 +19,7 @@ var generateMapping = flag.Bool("generate-mapping", false, "Generate Elasticsear
 var includeGraphs = flag.String("include", "", "Comma-separated list of graph URIs to include (allowlist)")
 var excludeGraphs = flag.String("exclude", "", "Comma-separated list of graph URIs to exclude (blocklist)")
 var textAnalyzer = flag.String("text-analyzer", "", "Elasticsearch analyzer to apply to inferred text fields (overrides language-based inference)")
-var idMaxBytes = flag.Int("id-max-bytes", processor.DefaultMaxIDBytes, "Maximum byte length of emitted document _id values; longer Subject URIs are truncated with a SHA-256 suffix. 0 disables the limit")
+var idMaxBytes = flag.Int("id-max-bytes", processor.DefaultMaxIDBytes, fmt.Sprintf("Maximum byte length of emitted document _id values; longer Subject URIs are truncated with a SHA-256 suffix. 0 disables the limit; values below %d are rejected", processor.MinMaxIDBytes))
 
 func main() {
 	flag.Parse()
@@ -82,6 +82,10 @@ func RunMapping() error {
 }
 
 func RunProcessor(includes, excludes map[string]bool) error {
+	if *idMaxBytes < 0 || (*idMaxBytes > 0 && *idMaxBytes < processor.MinMaxIDBytes) {
+		return fmt.Errorf("invalid -id-max-bytes %d: use 0 to disable the limit, or a value of at least %d bytes ('-' + 64-char SHA-256 suffix)", *idMaxBytes, processor.MinMaxIDBytes)
+	}
+
 	var indexErr error
 
 	grouper := processor.NewGrouper(func(doc processor.Document) {

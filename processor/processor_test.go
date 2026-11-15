@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/redmer/rdf-nquads-to-jsonl/parser"
 	"github.com/redmer/rdf-nquads-to-jsonl/processor"
@@ -253,6 +254,45 @@ func TestGrouperShortSubjectUnchanged(t *testing.T) {
 	g.Flush()
 	if docs[0].ID != "http://example.org/s" {
 		t.Errorf("short subject ID = %q, want unchanged", docs[0].ID)
+	}
+}
+
+func TestGrouperLongSubjectIDUTF8Boundary(t *testing.T) {
+	// A multibyte subject must be truncated at a rune boundary so the
+	// marshaled _id stays valid UTF-8 and within the byte limit (a partial
+	// rune would become U+FFFD under encoding/json and inflate the length).
+	max := 100
+	longSubject := "http://example.org/" + strings.Repeat("é", 200) // 'é' is 2 bytes in UTF-8
+	quad := parser.Quad{Subject: longSubject, Predicate: "http://example.org/p", Object: "val"}
+
+	var docs []processor.Document
+	g := processor.NewGrouper(func(doc processor.Document) {
+		docs = append(docs, doc)
+	})
+	g.SetMaxIDBytes(max)
+	g.Add(quad)
+	g.Flush()
+
+	if len(docs) != 1 {
+		t.Fatalf("expected 1 document, got %d", len(docs))
+	}
+	id := docs[0].ID
+	if len(id) > max {
+		t.Errorf("ID length = %d bytes, want <= %d", len(id), max)
+	}
+	if !utf8.ValidString(id) {
+		t.Errorf("ID is not valid UTF-8: %q", id)
+	}
+	b, err := json.Marshal(docs[0])
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if got := m["_id"].(string); len(got) > max {
+		t.Errorf("marshaled _id length = %d bytes, want <= %d", len(got), max)
 	}
 }
 
