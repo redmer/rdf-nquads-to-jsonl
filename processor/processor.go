@@ -83,8 +83,13 @@ func NewGrouper(emit EmitFunc) *Grouper {
 }
 
 // SetMaxIDBytes configures the maximum byte length of emitted document IDs.
-// A value <= 0 disables the limit.
+// A value <= 0 disables the limit. Positive values below MinMaxIDBytes would
+// truncate the SHA-256 digest itself (and could panic), so they are clamped
+// up to MinMaxIDBytes.
 func (g *Grouper) SetMaxIDBytes(maxBytes int) {
+	if maxBytes > 0 && maxBytes < MinMaxIDBytes {
+		maxBytes = MinMaxIDBytes
+	}
 	g.maxIDBytes = maxBytes
 }
 

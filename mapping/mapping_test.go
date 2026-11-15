@@ -170,8 +170,31 @@ func TestMapper_Generate(t *testing.T) {
 		t.Fatalf("description analyzer = %q, want %q", analyzer, "dutch")
 	}
 
-	// The html field references the html_strip analyzer, so the generated
-	// mapping must define it under settings.analysis.analyzer.
+	// The mapping is sent to PUT /<index>/_mapping (e.g. via esbulk
+	// -mapping), which rejects a top-level "settings" key; analyzer
+	// definitions belong to the index-creation body (see GenerateConfig).
+	if _, ok := result["settings"]; ok {
+		t.Errorf("Generate must not emit top-level settings: %v", result["settings"])
+	}
+}
+
+func TestMapper_GenerateConfig(t *testing.T) {
+	m := mapping.NewMapper()
+	m.Add(parser.Quad{Predicate: "http://example.org/html", Object: parser.RDFHTML("<p>hi</p>")})
+	m.Add(parser.Quad{Predicate: "http://example.org/name", Object: "Alice"})
+
+	output, err := m.GenerateConfig()
+	if err != nil {
+		t.Fatalf("GenerateConfig failed: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("Invalid JSON: %v", err)
+	}
+
+	// The html field references the html_strip analyzer, so the index
+	// config must define it under settings.analysis.analyzer.
 	settings, ok := result["settings"].(map[string]interface{})
 	if !ok {
 		t.Fatal("settings key missing: html_strip analyzer must be defined")
@@ -198,23 +221,55 @@ func TestMapper_Generate(t *testing.T) {
 	if htmlStrip["tokenizer"] != "standard" {
 		t.Errorf("html_strip tokenizer = %v, want standard", htmlStrip["tokenizer"])
 	}
+
+	mappings, ok := result["mappings"].(map[string]interface{})
+	if !ok {
+		t.Fatal("mappings key missing")
+	}
+	props, ok := mappings["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("mappings.properties missing")
+	}
+	htmlField, ok := props["http://example org/html"].(map[string]interface{})
+	if !ok {
+		t.Fatal("html field missing from mappings.properties")
+	}
+	if got := htmlField["analyzer"]; got != "html_strip" {
+		t.Errorf("html field analyzer = %v, want html_strip", got)
+	}
 }
 
-func TestMapper_Generate_NoHTMLNoSettings(t *testing.T) {
+func TestMapper_GenerateConfig_SettingsAlwaysPresent(t *testing.T) {
+	// Even without rdf:HTML fields, the settings must be included: analyzer
+	// definitions cannot be added to a live index, so omitting them would
+	// leave no way to add an rdf:HTML field later without recreating the
+	// index.
 	m := mapping.NewMapper()
 	m.Add(parser.Quad{Predicate: "http://example.org/name", Object: "Alice"})
 
-	output, err := m.Generate()
+	output, err := m.GenerateConfig()
 	if err != nil {
-		t.Fatalf("Generate failed: %v", err)
+		t.Fatalf("GenerateConfig failed: %v", err)
 	}
 
 	var result map[string]interface{}
 	if err := json.Unmarshal(output, &result); err != nil {
 		t.Fatalf("Invalid JSON: %v", err)
 	}
-	if _, ok := result["settings"]; ok {
-		t.Errorf("settings should not be emitted when no field uses the html_strip analyzer: %v", result["settings"])
+	settings, ok := result["settings"].(map[string]interface{})
+	if !ok {
+		t.Fatal("settings should be emitted even without rdf:HTML fields")
+	}
+	analysis, ok := settings["analysis"].(map[string]interface{})
+	if !ok {
+		t.Fatal("settings.analysis missing")
+	}
+	analyzers, ok := analysis["analyzer"].(map[string]interface{})
+	if !ok {
+		t.Fatal("settings.analysis.analyzer missing")
+	}
+	if _, ok := analyzers["html_strip"]; !ok {
+		t.Errorf("html_strip analyzer not defined, got: %v", analyzers)
 	}
 }
 

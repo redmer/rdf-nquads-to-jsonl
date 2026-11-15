@@ -1,6 +1,8 @@
 package processor_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -226,6 +228,35 @@ func TestGrouperLongSubjectID(t *testing.T) {
 	g2.Flush()
 	if docs2[0].ID != id {
 		t.Errorf("protectID not deterministic: %q vs %q", docs2[0].ID, id)
+	}
+}
+
+func TestGrouperMaxIDBytesBelowMinimumClamped(t *testing.T) {
+	// Positive limits below MinMaxIDBytes would truncate the SHA-256 digest
+	// (and a negative prefix length would panic), so SetMaxIDBytes clamps
+	// them up to MinMaxIDBytes.
+	longSubject := "http://example.org/" + strings.Repeat("a", 1000)
+	quad := parser.Quad{Subject: longSubject, Predicate: "http://example.org/p", Object: "val"}
+
+	var docs []processor.Document
+	g := processor.NewGrouper(func(doc processor.Document) {
+		docs = append(docs, doc)
+	})
+	g.SetMaxIDBytes(1)
+	g.Add(quad)
+	g.Flush()
+
+	if len(docs) != 1 {
+		t.Fatalf("expected 1 document, got %d", len(docs))
+	}
+	id := docs[0].ID
+	if len(id) > processor.MinMaxIDBytes {
+		t.Errorf("ID length = %d bytes, want <= %d (clamped minimum)", len(id), processor.MinMaxIDBytes)
+	}
+	sum := sha256.Sum256([]byte(longSubject))
+	wantDigest := hex.EncodeToString(sum[:])
+	if !strings.HasSuffix(id, "-"+wantDigest) {
+		t.Errorf("ID %q does not end with the full SHA-256 digest of the subject", id[:20])
 	}
 }
 

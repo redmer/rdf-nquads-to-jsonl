@@ -23,14 +23,16 @@ $ rdf-nquads-to-jsonl -help
 Usage of rdf-nquads-to-jsonl:
   -exclude string
         Comma-separated list of graph URIs to exclude (blocklist)
+  -generate-config
+        Generate Elasticsearch index-creation body (settings + mappings) from input, for use with esbulk -c
   -generate-mapping
         Generate Elasticsearch mapping from input
   -id-max-bytes int
-        Maximum byte length of emitted document _id values; longer Subject URIs are truncated with a SHA-256 suffix. Must be 0 (disabled) or at least 65 bytes (default 512)
+        Maximum byte length of emitted document _id values; longer Subject URIs are truncated with a SHA-256 suffix. 0 disables the limit; values below 65 are rejected (default 512)
   -include string
         Comma-separated list of graph URIs to include (allowlist)
   -text-analyzer string
-    Elasticsearch analyzer to apply to inferred text fields (overrides language-based inference)
+        Elasticsearch analyzer to apply to inferred text fields (overrides language-based inference)
 ```
 
 Demonstrating output: downloading a Gzipped NQuads file, unzipping, sorting and sending colorizing output to less:
@@ -70,8 +72,11 @@ A more typical example, sending to a ElasticSearch server with an API key:
 
 ```sh
 zcat data.nq.gz | LC_ALL=C sort | rdf-nquads-to-jsonl -generate-mapping > mapping.json
-zcat data.nq.gz | LC_ALL=C sort | rdf-nquads-to-jsonl | esbulk -server http://localhost:9200 -index my-index2 -apikey '...' -id _id -mapping mapping.json
+zcat data.nq.gz | LC_ALL=C sort | rdf-nquads-to-jsonl -generate-config > config.json
+zcat data.nq.gz | LC_ALL=C sort | rdf-nquads-to-jsonl | esbulk -server http://localhost:9200 -index my-index2 -apikey '...' -id _id -c config.json -mapping mapping.json
 ```
+
+`-generate-mapping` emits a mapping-only body, which `esbulk -mapping` sends to `PUT /<index>/_mapping`; that endpoint rejects top-level `settings`. The analyzer definitions (e.g. `html_strip` for `rdf:HTML` fields) therefore live in the `-generate-config` output, applied at index-creation time via `esbulk -c`. This fits zero-downtime reindexing: create the new index with `-c`, bulk-load, then reassign the alias. `esbulk -c` is a no-op when the index already exists, so the settings never overwrite a live index.
 
 ## Document Format
 
@@ -92,7 +97,7 @@ Each Subject becomes one Elasticsearch document:
 - Numbers and boolean datatype become JSON numbers and booleans.
 - `xsd:date`, `xsd:dateTime` literals are treated as dates for mapping generation.
 - `xsd:anyURI` literals are treated as keyword values for mapping generation.
-- `rdf:HTML` literals map to `text` with the `html_strip` analyzer; the generated mapping defines that custom analyzer under `settings.analysis.analyzer.html_strip` (HTML char filter + standard tokenizer).
+- `rdf:HTML` literals map to `text` with the `html_strip` analyzer; `-generate-config` defines that custom analyzer under `settings.analysis.analyzer.html_strip` (HTML char filter + standard tokenizer), so it is in place when the index is created.
 - `geosparql:wktLiteral` and `geosparql:geoJSONLiteral` map to `geo_shape`.
 - Markdown literals map to `text`. Recognized datatypes:
   - `http://ns.ontowiki.net/SysOnt/Markdown`
