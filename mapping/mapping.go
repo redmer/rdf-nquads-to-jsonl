@@ -141,7 +141,7 @@ var analyzerByLang = map[string]string{
 	"it":    "italian",
 	"ja":    "cjk",
 	"ko":    "cjk",
-	"ku":    "sorani", // is this the right key?
+	"ku":    "sorani", // Central Kurdish
 	"lt":    "lithuanian",
 	"lv":    "latvian",
 	"nl":    "dutch",
@@ -294,10 +294,15 @@ func (m *Mapper) Generate() ([]byte, error) {
 			mapping = map[string]interface{}{"type": "geo_shape"}
 		case TypeText:
 			mapping = map[string]interface{}{"type": "text"}
-			if m.textAnalyzer != "" {
+			switch {
+			case profile.hasRDFHTML:
+				mapping["analyzer"] = "html_strip"
+			case m.textAnalyzer != "":
 				mapping["analyzer"] = m.textAnalyzer
-			} else if analyzer := inferAnalyzer(profile); analyzer != "" {
-				mapping["analyzer"] = analyzer
+			default:
+				if analyzer := inferAnalyzer(profile); analyzer != "" {
+					mapping["analyzer"] = analyzer
+				}
 			}
 		default:
 			// Fallback
@@ -316,6 +321,19 @@ func (m *Mapper) Generate() ([]byte, error) {
 	// We do NOT wrap this in "mappings" because tools like esbulk expect
 	// the mapping definition directly (which starts with "properties").
 	result := map[string]interface{}{
+		// Fields not covered by an explicit property above are dynamic.
+		// Map dynamically detected strings to keyword so they stay aggregatable
+		// instead of being indexed as analyzed text.
+		"dynamic_templates": []interface{}{
+			map[string]interface{}{
+				"strings_as_keyword": map[string]interface{}{
+					"match_mapping_type": "string",
+					"mapping": map[string]interface{}{
+						"type": "keyword",
+					},
+				},
+			},
+		},
 		"properties": properties,
 	}
 

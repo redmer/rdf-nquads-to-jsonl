@@ -125,10 +125,37 @@ func TestMapper_Generate(t *testing.T) {
 		}
 
 		if tt.field == "http://example org/html" {
-			if gotAnalyzer, hasAnalyzer := fieldMap["analyzer"].(string); hasAnalyzer {
-				t.Errorf("Field %s: rdf:HTML field should not set a custom analyzer, got %s", tt.field, gotAnalyzer)
+			if gotAnalyzer, _ := fieldMap["analyzer"].(string); gotAnalyzer != "html_strip" {
+				t.Errorf("Field %s: rdf:HTML field should use the html_strip analyzer, got %q", tt.field, gotAnalyzer)
 			}
 		}
+	}
+
+	templates, ok := result["dynamic_templates"].([]interface{})
+	if !ok || len(templates) == 0 {
+		t.Fatalf("Missing dynamic_templates in generated mapping: %v", result["dynamic_templates"])
+	}
+	foundStringsAsKeyword := false
+	for _, tpl := range templates {
+		tplMap, ok := tpl.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		for _, rule := range tplMap {
+			ruleMap, ok := rule.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if ruleMap["match_mapping_type"] == "string" {
+				mappingField, _ := ruleMap["mapping"].(map[string]interface{})
+				if mappingField["type"] == "keyword" {
+					foundStringsAsKeyword = true
+				}
+			}
+		}
+	}
+	if !foundStringsAsKeyword {
+		t.Errorf("dynamic_templates should map dynamic strings to keyword, got: %v", templates)
 	}
 
 	descriptionMap, ok := props["http://example org/description"].(map[string]interface{})
@@ -177,5 +204,34 @@ func TestMapper_Generate_WithForcedTextAnalyzer(t *testing.T) {
 		if analyzer, _ := fieldMap["analyzer"].(string); analyzer != "standard" {
 			t.Fatalf("Field %s analyzer = %q, want standard", field, analyzer)
 		}
+	}
+}
+
+func TestMapper_Generate_HTMLWinsOverForcedAnalyzer(t *testing.T) {
+	m := mapping.NewMapper()
+	m.SetTextAnalyzer("standard")
+
+	m.Add(parser.Quad{Predicate: "http://example.org/html", Object: parser.RDFHTML("<p>Hello</p>")})
+
+	output, err := m.Generate()
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("Invalid JSON: %v", err)
+	}
+
+	props, ok := result["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Missing properties key")
+	}
+	fieldMap, ok := props["http://example org/html"].(map[string]interface{})
+	if !ok {
+		t.Fatal("html field missing")
+	}
+	if analyzer, _ := fieldMap["analyzer"].(string); analyzer != "html_strip" {
+		t.Errorf("rdf:HTML field analyzer = %q, want html_strip even with -text-analyzer set", analyzer)
 	}
 }
