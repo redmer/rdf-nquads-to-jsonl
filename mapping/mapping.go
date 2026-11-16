@@ -294,14 +294,25 @@ func inferStringFieldType(profile *fieldProfile) FieldType {
 }
 
 // Settings is the index-creation settings body defining the custom
-// html_strip analyzer referenced by rdf:HTML fields. It is constant and
-// data-independent: analyzer definitions can only be applied when an index
-// is created (or while it is closed), so they cannot travel in the mapping
-// body passed to PUT /<index>/_mapping (e.g. via `esbulk -mapping`).
+// html_strip analyzers referenced by rdf:HTML fields and the copy_to
+// catch-all. It is constant and data-independent: analyzer definitions can
+// only be applied when an index is created (or while it is closed), so they
+// cannot travel in the mapping body passed to PUT /<index>/_mapping (e.g.
+// via `esbulk -mapping`).
 var Settings = map[string]interface{}{
 	"analysis": map[string]interface{}{
 		"analyzer": map[string]interface{}{
+			// html_strip strips markup from rdf:HTML source fields.
 			"html_strip": map[string]interface{}{
+				"type":        "custom",
+				"char_filter": []interface{}{"html_strip"},
+				"tokenizer":   "standard",
+			},
+			// copy_to_html_strip is the catch-all variant: rdf:HTML values
+			// copied into a copy_to target arrive as raw markup, so the
+			// catch-all must strip it too, otherwise searches match tag
+			// names and attribute names present only in the markup.
+			"copy_to_html_strip": map[string]interface{}{
 				"type":        "custom",
 				"char_filter": []interface{}{"html_strip"},
 				"tokenizer":   "standard",
@@ -380,6 +391,11 @@ func (m *Mapper) Generate() ([]byte, error) {
 		}
 		targetMapping := m.textMapping(nil)
 		delete(targetMapping, "copy_to")
+		// rdf:HTML source fields copy their raw markup into the catch-all,
+		// so it needs the markup-stripping analyzer: otherwise searches
+		// there can match tag names and attribute names that the source
+		// field strips.
+		targetMapping["analyzer"] = "copy_to_html_strip"
 		properties[m.options.CopyTo] = targetMapping
 	}
 
@@ -462,8 +478,8 @@ func (m *Mapper) textMapping(profile *fieldProfile) map[string]interface{} {
 }
 
 // GenerateConfig produces a complete Elasticsearch index-creation body:
-// the generated mapping plus the settings defining the html_strip analyzer.
-// Feed it to `esbulk -c` so the analyzer is defined when the index is
+// the generated mapping plus the settings defining the html_strip analyzers.
+// Feed it to `esbulk -c` so the analyzers are defined when the index is
 // created. The settings are included unconditionally because analyzer
 // definitions cannot be added to a live index, so omitting them when no
 // rdf:HTML field was detected would leave no way to add such a field later

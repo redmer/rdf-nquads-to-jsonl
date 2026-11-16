@@ -478,8 +478,8 @@ func TestMapper_GenerateDatatypeAndOptionMappings(t *testing.T) {
 		t.Errorf("description analyzer = %v, want standard", description["analyzer"])
 	}
 	fullText := assertMapping("full_text", "text")
-	if fullText["analyzer"] != "standard" {
-		t.Errorf("full_text analyzer = %v, want standard", fullText["analyzer"])
+	if fullText["analyzer"] != "copy_to_html_strip" {
+		t.Errorf("full_text analyzer = %v, want copy_to_html_strip", fullText["analyzer"])
 	}
 	if _, ok := fullText["copy_to"]; ok {
 		t.Errorf("copy-to target must not copy to itself: %v", fullText)
@@ -538,6 +538,68 @@ func TestMapper_GenerateCopyToConflict(t *testing.T) {
 	m.Add(parser.Quad{Predicate: "full_text", Object: "source"})
 	if _, err := m.Generate(); err == nil {
 		t.Fatal("expected copy_to target conflict error")
+	}
+}
+
+func TestMapper_CopyToTargetStripsMarkup(t *testing.T) {
+	options := mapping.DefaultOptions()
+	options.CopyTo = "full_text"
+	m := mapping.NewMapper(options)
+	// An rdf:HTML field copies raw markup into the catch-all; the catch-all
+	// must strip it so searches cannot match tag or attribute names.
+	m.Add(parser.Quad{Predicate: "http://example.org/html", Object: parser.RDFHTML(`<p class="x">Hello</p>`)})
+	m.Add(parser.Quad{Predicate: "http://example.org/description", Object: "A long enough description"})
+
+	output, err := m.Generate()
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("Invalid JSON: %v", err)
+	}
+	props := result["properties"].(map[string]interface{})
+
+	html := props["http://example org/html"].(map[string]interface{})
+	if html["analyzer"] != "html_strip" {
+		t.Errorf("rdf:HTML source analyzer = %v, want html_strip", html["analyzer"])
+	}
+	if html["copy_to"] != "full_text" {
+		t.Errorf("rdf:HTML source copy_to = %v, want full_text (raw markup is copied)", html["copy_to"])
+	}
+
+	fullText := props["full_text"].(map[string]interface{})
+	if fullText["type"] != "text" {
+		t.Fatalf("full_text type = %v, want text", fullText["type"])
+	}
+	if fullText["analyzer"] != "copy_to_html_strip" {
+		t.Errorf("full_text analyzer = %v, want copy_to_html_strip", fullText["analyzer"])
+	}
+	if _, ok := fullText["copy_to"]; ok {
+		t.Errorf("copy-to target must not copy to itself: %v", fullText)
+	}
+
+	// The catch-all analyzer must be defined in the index-creation settings,
+	// otherwise the mapping references an analyzer that does not exist.
+	config, err := m.GenerateConfig()
+	if err != nil {
+		t.Fatalf("GenerateConfig failed: %v", err)
+	}
+	var configDoc map[string]interface{}
+	if err := json.Unmarshal(config, &configDoc); err != nil {
+		t.Fatalf("Invalid config JSON: %v", err)
+	}
+	analyzers := configDoc["settings"].(map[string]interface{})["analysis"].(map[string]interface{})["analyzer"].(map[string]interface{})
+	catchAll, ok := analyzers["copy_to_html_strip"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("copy_to_html_strip analyzer not defined, got: %v", analyzers)
+	}
+	if catchAll["type"] != "custom" || catchAll["tokenizer"] != "standard" {
+		t.Errorf("copy_to_html_strip = %v, want custom analyzer with standard tokenizer", catchAll)
+	}
+	charFilters, ok := catchAll["char_filter"].([]interface{})
+	if !ok || len(charFilters) != 1 || charFilters[0] != "html_strip" {
+		t.Errorf("copy_to_html_strip char_filter = %v, want [html_strip]", catchAll["char_filter"])
 	}
 }
 
