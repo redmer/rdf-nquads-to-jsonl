@@ -101,7 +101,7 @@ func TestParseQuad(t *testing.T) {
 			line:     `<http://example.org/s> <http://example.org/p> "123.45"^^<http://www.w3.org/2001/XMLSchema#decimal> .`,
 			wantSubj: "http://example.org/s",
 			wantPred: "http://example.org/p",
-			wantObj:  123.45,
+			wantObj:  parser.XSDDecimal(123.45),
 		},
 		{
 			name:     "xsd:double",
@@ -329,6 +329,111 @@ func TestGeoJSONMarshalJSON(t *testing.T) {
 				if got != tt.wantStr {
 					t.Errorf("got %q, want %q", got, tt.wantStr)
 				}
+			}
+		})
+	}
+}
+
+func TestXSDIntegerFamily(t *testing.T) {
+	datatypes := []string{
+		"integer", "int", "long", "short", "byte", "nonNegativeInteger",
+		"nonPositiveInteger", "positiveInteger", "negativeInteger", "unsignedLong",
+		"unsignedInt", "unsignedShort", "unsignedByte",
+	}
+	for _, datatype := range datatypes {
+		t.Run(datatype, func(t *testing.T) {
+			quad, err := parser.ParseQuad(`<s> <p> "123"^^<http://www.w3.org/2001/XMLSchema#` + datatype + `> .`)
+			if err != nil {
+				t.Fatalf("ParseQuad failed: %v", err)
+			}
+			if got, ok := quad.Object.(int64); !ok || got != 123 {
+				t.Fatalf("object = %#v (%T), want int64(123)", quad.Object, quad.Object)
+			}
+
+			quad, err = parser.ParseQuad(`<s> <p> "9223372036854775808"^^<http://www.w3.org/2001/XMLSchema#` + datatype + `> .`)
+			if err != nil {
+				t.Fatalf("ParseQuad overflow failed: %v", err)
+			}
+			if got, ok := quad.Object.(float64); !ok || got != float64(9223372036854775808) {
+				t.Fatalf("overflow object = %#v (%T), want float64 fallback", quad.Object, quad.Object)
+			}
+
+			huge := strings.Repeat("9", 400)
+			quad, err = parser.ParseQuad(`<s> <p> "` + huge + `"^^<http://www.w3.org/2001/XMLSchema#` + datatype + `> .`)
+			if err != nil {
+				t.Fatalf("ParseQuad large overflow failed: %v", err)
+			}
+			if got, ok := quad.Object.(string); !ok || got != huge {
+				t.Fatalf("large overflow object = %#v (%T), want lexical string fallback", quad.Object, quad.Object)
+			}
+		})
+	}
+}
+
+func TestXSDDecimalSpecialValuesStayStrings(t *testing.T) {
+	for _, value := range []string{"INF", "+INF", "-INF", "NaN", "1e999"} {
+		t.Run(value, func(t *testing.T) {
+			quad, err := parser.ParseQuad(`<s> <p> "` + value + `"^^<http://www.w3.org/2001/XMLSchema#decimal> .`)
+			if err != nil {
+				t.Fatalf("ParseQuad failed: %v", err)
+			}
+			if got, ok := quad.Object.(string); !ok || got != value {
+				t.Fatalf("object = %#v (%T), want string %q", quad.Object, quad.Object, value)
+			}
+		})
+	}
+}
+
+func TestXSDTimeAndKeywordDatatypes(t *testing.T) {
+	tests := []struct {
+		datatype string
+		value    string
+		want     interface{}
+	}{
+		{"time", "12:34:56Z", parser.XSDTime("12:34:56Z")},
+		{"time", "12:34:56.123+02:00", parser.XSDTime("12:34:56.123+02:00")},
+		{"language", "en", parser.XSDLanguage("en")},
+		{"duration", "P1Y2M", parser.XSDKeyword("P1Y2M")},
+		{"base64Binary", "YWJj", parser.XSDKeyword("YWJj")},
+		{"hexBinary", "AABB", parser.XSDKeyword("AABB")},
+		{"QName", "ns:name", parser.XSDKeyword("ns:name")},
+		{"NMTOKEN", "name-token", parser.XSDKeyword("name-token")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.datatype+"/"+tt.value, func(t *testing.T) {
+			quad, err := parser.ParseQuad(`<s> <p> "` + tt.value + `"^^<http://www.w3.org/2001/XMLSchema#` + tt.datatype + `> .`)
+			if err != nil {
+				t.Fatalf("ParseQuad failed: %v", err)
+			}
+			if quad.Object != tt.want {
+				t.Fatalf("object = %#v, want %#v", quad.Object, tt.want)
+			}
+		})
+	}
+
+	if _, err := parser.ParseQuad(`<s> <p> "25:61:00"^^<http://www.w3.org/2001/XMLSchema#time> .`); err == nil {
+		t.Fatal("invalid xsd:time was accepted")
+	}
+}
+
+func TestRDFJSONMarshalJSON(t *testing.T) {
+	tests := []struct {
+		name string
+		in   parser.RDFJSON
+		want string
+	}{
+		{"object", `{"nested":{"value":1}}`, `{"nested":{"value":1}}`},
+		{"invalid JSON", `{invalid`, `"{invalid"`},
+		{"array", `[1,2]`, `"[1,2]"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := json.Marshal(tt.in)
+			if err != nil {
+				t.Fatalf("Marshal failed: %v", err)
+			}
+			if string(got) != tt.want {
+				t.Fatalf("JSON = %s, want %s", got, tt.want)
 			}
 		})
 	}

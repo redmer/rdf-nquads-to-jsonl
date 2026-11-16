@@ -14,8 +14,10 @@ const (
 	TypeUnknown FieldType = iota
 	TypeBool
 	TypeLong
+	TypeDecimal
 	TypeDouble
 	TypeDate
+	TypeObject
 	TypeText
 	TypeKeyword
 	TypeGeoShape
@@ -28,6 +30,28 @@ type Mapper struct {
 
 	// textAnalyzer forces analyzer for every inferred text field when non-empty.
 	textAnalyzer string
+	options      Options
+}
+
+// Options controls the generated Elasticsearch mapping shape.
+type Options struct {
+	DecimalScalingFactor       float64
+	TextKeywordSubfield        bool
+	KeywordIgnoreAbove         int
+	CopyTo                     string
+	KeywordLowercaseNormalizer bool
+	IgnoreMalformedGeo         bool
+	DateSubfield               bool
+}
+
+// DefaultOptions returns the default mapping behavior.
+func DefaultOptions() Options {
+	return Options{
+		DecimalScalingFactor: 10000,
+		TextKeywordSubfield:  true,
+		KeywordIgnoreAbove:   256,
+		IgnoreMalformedGeo:   true,
+	}
 }
 
 type fieldProfile struct {
@@ -41,10 +65,15 @@ type fieldProfile struct {
 	hasRDFHTML      bool
 }
 
-// NewMapper creates a new Mapper.
-func NewMapper() *Mapper {
+// NewMapper creates a new Mapper. If options are omitted, DefaultOptions are used.
+func NewMapper(options ...Options) *Mapper {
+	opts := DefaultOptions()
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	return &Mapper{
-		fields: make(map[string]*fieldProfile),
+		fields:  make(map[string]*fieldProfile),
+		options: opts,
 	}
 }
 
@@ -96,12 +125,21 @@ func inferType(obj interface{}) (fieldType FieldType, hasStringLike bool, lang s
 		return TypeBool, false, "", false, 0
 	case int, int64:
 		return TypeLong, false, "", false, 0
+	case parser.XSDDecimal:
+		return TypeDecimal, false, "", false, 0
 	case float32, float64:
 		return TypeDouble, false, "", false, 0
-	case parser.Date, parser.DateTime:
+	case parser.Date, parser.DateTime, parser.XSDTime:
 		return TypeDate, false, "", false, 0
 	case parser.URI, parser.AnyURI:
 		return TypeKeyword, false, "", false, 0
+	case parser.XSDLanguage, parser.XSDKeyword:
+		return TypeKeyword, false, "", false, 0
+	case parser.RDFJSON:
+		if obj.IsObject() {
+			return TypeObject, false, "", false, 0
+		}
+		return TypeUnknown, true, "", false, len(obj)
 	case parser.GeoWKT, parser.GeoJSON:
 		return TypeGeoShape, false, "", false, 0
 	case parser.Markdown:
@@ -177,7 +215,7 @@ func inferAnalyzer(profile *fieldProfile) string {
 			continue
 		}
 		totalKnown += count
-		if count > bestCount {
+		if count > bestCount || (count == bestCount && analyzer < bestAnalyzer) {
 			bestCount = count
 			bestAnalyzer = analyzer
 		}
@@ -222,13 +260,18 @@ func resolveType(t1, t2 FieldType) FieldType {
 		return TypeText
 	}
 
-	// Mixed numeric types upgrade to Double.
-	if (t1 == TypeLong && t2 == TypeDouble) || (t1 == TypeDouble && t2 == TypeLong) {
+	// Mixed numeric types (including decimal with integer or binary floats)
+	// upgrade to Double; only decimal-only fields use scaled_float.
+	if isNumericType(t1) && isNumericType(t2) {
 		return TypeDouble
 	}
 
 	// Any other mix (e.g. Bool + Long) falls back to Text for safety.
 	return TypeText
+}
+
+func isNumericType(t FieldType) bool {
+	return t == TypeLong || t == TypeDecimal || t == TypeDouble
 }
 
 func inferStringFieldType(profile *fieldProfile) FieldType {
@@ -284,9 +327,7 @@ func (m *Mapper) Generate() ([]byte, error) {
 	// _id is metadata, doesn't go in 'properties' usually, but outputting it
 	// might confuse ES if it considers it a field. ES handles _id automatically.
 	// _graph is a string array.
-	properties["_graph"] = map[string]interface{}{
-		"type": "keyword",
-	}
+	properties["_graph"] = m.keywordMapping()
 
 	for field, profile := range m.fields {
 		var mapping map[string]interface{}
@@ -302,39 +343,52 @@ func (m *Mapper) Generate() ([]byte, error) {
 			mapping = map[string]interface{}{"type": "boolean"}
 		case TypeLong:
 			mapping = map[string]interface{}{"type": "long"}
+		case TypeDecimal:
+			mapping = map[string]interface{}{
+				"type":           "scaled_float",
+				"scaling_factor": m.options.DecimalScalingFactor,
+			}
 		case TypeDouble:
 			mapping = map[string]interface{}{"type": "double"}
 		case TypeDate:
-			mapping = map[string]interface{}{
-				"type":   "date",
-				"format": "strict_date_optional_time||strict_date",
+			mapping = m.dateMapping()
+			if m.options.DateSubfield {
+				mapping = m.textMapping(profile)
+				fields, ok := mapping["fields"].(map[string]interface{})
+				if !ok {
+					fields = make(map[string]interface{})
+					mapping["fields"] = fields
+				}
+				fields["date"] = m.dateMappingWithMalformed()
 			}
 		case TypeKeyword:
-			mapping = map[string]interface{}{"type": "keyword"}
+			mapping = m.keywordMapping()
+		case TypeObject:
+			mapping = map[string]interface{}{"type": "object"}
 		case TypeGeoShape:
 			mapping = map[string]interface{}{"type": "geo_shape"}
-		case TypeText:
-			mapping = map[string]interface{}{"type": "text"}
-			switch {
-			case profile.hasRDFHTML:
-				mapping["analyzer"] = "html_strip"
-			case m.textAnalyzer != "":
-				mapping["analyzer"] = m.textAnalyzer
-			default:
-				if analyzer := inferAnalyzer(profile); analyzer != "" {
-					mapping["analyzer"] = analyzer
-				}
+			if m.options.IgnoreMalformedGeo {
+				mapping["ignore_malformed"] = true
 			}
+		case TypeText:
+			mapping = m.textMapping(profile)
 		default:
 			// Fallback
-			mapping = map[string]interface{}{"type": "text"}
-			if m.textAnalyzer != "" {
-				mapping["analyzer"] = m.textAnalyzer
-			} else if analyzer := inferAnalyzer(profile); analyzer != "" {
-				mapping["analyzer"] = analyzer
-			}
+			mapping = m.textMapping(profile)
 		}
 		properties[field] = mapping
+	}
+
+	if m.options.CopyTo != "" {
+		if m.options.CopyTo == "_id" {
+			return nil, fmt.Errorf("copy_to target %q conflicts with Elasticsearch metadata", m.options.CopyTo)
+		}
+		if _, exists := properties[m.options.CopyTo]; exists {
+			return nil, fmt.Errorf("copy_to target %q conflicts with an inferred field", m.options.CopyTo)
+		}
+		targetMapping := m.textMapping(nil)
+		delete(targetMapping, "copy_to")
+		properties[m.options.CopyTo] = targetMapping
 	}
 
 	// Wrap in standard ES mapping structure
@@ -342,6 +396,8 @@ func (m *Mapper) Generate() ([]byte, error) {
 	// We do NOT wrap this in "mappings" because tools like esbulk expect
 	// the mapping definition directly (which starts with "properties").
 	result := map[string]interface{}{
+		"date_detection":    false,
+		"numeric_detection": false,
 		// Fields not covered by an explicit property above are dynamic.
 		// Map dynamically detected strings to keyword so they stay aggregatable
 		// instead of being indexed as analyzed text.
@@ -349,9 +405,7 @@ func (m *Mapper) Generate() ([]byte, error) {
 			map[string]interface{}{
 				"strings_as_keyword": map[string]interface{}{
 					"match_mapping_type": "string",
-					"mapping": map[string]interface{}{
-						"type": "keyword",
-					},
+					"mapping":            m.keywordMapping(),
 				},
 			},
 		},
@@ -359,6 +413,60 @@ func (m *Mapper) Generate() ([]byte, error) {
 	}
 
 	return json.MarshalIndent(result, "", "  ")
+}
+
+func (m *Mapper) dateMapping() map[string]interface{} {
+	return map[string]interface{}{
+		"type":   "date",
+		"format": "strict_date_optional_time||strict_date||strict_hour_minute_second||strict_hour_minute_second_fraction||epoch_millis",
+	}
+}
+
+func (m *Mapper) dateMappingWithMalformed() map[string]interface{} {
+	result := m.dateMapping()
+	result["ignore_malformed"] = true
+	return result
+}
+
+func (m *Mapper) keywordMapping() map[string]interface{} {
+	result := map[string]interface{}{"type": "keyword"}
+	if m.options.KeywordIgnoreAbove > 0 {
+		result["ignore_above"] = m.options.KeywordIgnoreAbove
+	}
+	if m.options.KeywordLowercaseNormalizer {
+		result["normalizer"] = "lowercase_normalizer"
+	}
+	return result
+}
+
+func (m *Mapper) textMapping(profile *fieldProfile) map[string]interface{} {
+	result := map[string]interface{}{"type": "text"}
+	switch {
+	case profile != nil && profile.hasRDFHTML:
+		result["analyzer"] = "html_strip"
+	case m.textAnalyzer != "":
+		result["analyzer"] = m.textAnalyzer
+	case profile != nil:
+		if analyzer := inferAnalyzer(profile); analyzer != "" {
+			result["analyzer"] = analyzer
+		}
+	}
+	if m.options.CopyTo != "" {
+		result["copy_to"] = m.options.CopyTo
+	}
+	if m.options.TextKeywordSubfield {
+		keyword := map[string]interface{}{"type": "keyword"}
+		if m.options.KeywordIgnoreAbove > 0 {
+			keyword["ignore_above"] = m.options.KeywordIgnoreAbove
+		}
+		if m.options.KeywordLowercaseNormalizer {
+			keyword["normalizer"] = "lowercase_normalizer"
+		}
+		fields := make(map[string]interface{})
+		fields["keyword"] = keyword
+		result["fields"] = fields
+	}
+	return result
 }
 
 // GenerateConfig produces a complete Elasticsearch index-creation body:
@@ -379,8 +487,20 @@ func (m *Mapper) GenerateConfig() ([]byte, error) {
 		return nil, fmt.Errorf("unmarshaling generated mapping: %w", err)
 	}
 
+	analysis := Settings["analysis"].(map[string]interface{})
+	configAnalysis := map[string]interface{}{
+		"analyzer": analysis["analyzer"],
+	}
+	if m.options.KeywordLowercaseNormalizer {
+		configAnalysis["normalizer"] = map[string]interface{}{
+			"lowercase_normalizer": map[string]interface{}{
+				"type":   "custom",
+				"filter": []string{"lowercase"},
+			},
+		}
+	}
 	return json.MarshalIndent(map[string]interface{}{
-		"settings": Settings,
+		"settings": map[string]interface{}{"analysis": configAnalysis},
 		"mappings": mappingDoc,
 	}, "", "  ")
 }

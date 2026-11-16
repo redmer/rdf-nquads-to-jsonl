@@ -2,6 +2,7 @@ package mapping_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/redmer/rdf-nquads-to-jsonl/mapping"
@@ -119,8 +120,14 @@ func TestMapper_Generate(t *testing.T) {
 		}
 
 		if gotType == "text" {
-			if _, hasFields := fieldMap["fields"]; hasFields {
-				t.Errorf("Field %s: text field should not have a keyword subfield", tt.field)
+			fields, hasFields := fieldMap["fields"].(map[string]interface{})
+			if !hasFields {
+				t.Errorf("Field %s: expected a keyword subfield by default", tt.field)
+			} else {
+				keyword, ok := fields["keyword"].(map[string]interface{})
+				if !ok || keyword["type"] != "keyword" || keyword["ignore_above"] != float64(256) {
+					t.Errorf("Field %s: unexpected keyword subfield: %v", tt.field, fields["keyword"])
+				}
 			}
 		}
 
@@ -128,6 +135,18 @@ func TestMapper_Generate(t *testing.T) {
 			if gotAnalyzer, _ := fieldMap["analyzer"].(string); gotAnalyzer != "html_strip" {
 				t.Errorf("Field %s: rdf:HTML field should use the html_strip analyzer, got %q", tt.field, gotAnalyzer)
 			}
+		}
+		if tt.field == "http://example org/ref" && fieldMap["ignore_above"] != float64(256) {
+			t.Errorf("URI keyword ignore_above = %v, want 256", fieldMap["ignore_above"])
+		}
+		if tt.field == "http://example org/date_mixed" {
+			format, _ := fieldMap["format"].(string)
+			if !strings.Contains(format, "epoch_millis") || !strings.Contains(format, "strict_hour_minute_second") {
+				t.Errorf("date format = %q, want epoch and time formats", format)
+			}
+		}
+		if (tt.field == "http://example org/wkt" || tt.field == "http://example org/geojson") && fieldMap["ignore_malformed"] != true {
+			t.Errorf("geo_shape should ignore malformed values by default, got %v", fieldMap)
 		}
 	}
 
@@ -156,6 +175,9 @@ func TestMapper_Generate(t *testing.T) {
 	}
 	if !foundStringsAsKeyword {
 		t.Errorf("dynamic_templates should map dynamic strings to keyword, got: %v", templates)
+	}
+	if result["date_detection"] != false || result["numeric_detection"] != false {
+		t.Errorf("date/numeric detection should be disabled, got date=%v numeric=%v", result["date_detection"], result["numeric_detection"])
 	}
 
 	descriptionMap, ok := props["http://example org/description"].(map[string]interface{})
@@ -335,5 +357,225 @@ func TestMapper_Generate_HTMLWinsOverForcedAnalyzer(t *testing.T) {
 	}
 	if analyzer, _ := fieldMap["analyzer"].(string); analyzer != "html_strip" {
 		t.Errorf("rdf:HTML field analyzer = %q, want html_strip even with -text-analyzer set", analyzer)
+	}
+}
+
+func TestMapper_GenerateDatatypeAndOptionMappings(t *testing.T) {
+	options := mapping.DefaultOptions()
+	options.DecimalScalingFactor = 1000
+	options.CopyTo = "full_text"
+	options.KeywordLowercaseNormalizer = true
+	options.DateSubfield = true
+	options.IgnoreMalformedGeo = true
+	m := mapping.NewMapper(options)
+	m.SetTextAnalyzer("standard")
+
+	for _, line := range []string{
+		`<s> <http://example.org/decimal> "1.25"^^<http://www.w3.org/2001/XMLSchema#decimal> .`,
+		`<s> <http://example.org/mixed> "1.25"^^<http://www.w3.org/2001/XMLSchema#decimal> .`,
+		`<s> <http://example.org/mixed> "2.5"^^<http://www.w3.org/2001/XMLSchema#double> .`,
+		`<s> <http://example.org/time> "12:34:56.123Z"^^<http://www.w3.org/2001/XMLSchema#time> .`,
+		`<s> <http://example.org/language> "en"^^<http://www.w3.org/2001/XMLSchema#language> .`,
+		`<s> <http://example.org/keyword> "P1Y"^^<http://www.w3.org/2001/XMLSchema#duration> .`,
+		`<s> <http://example.org/json> "{\"nested\":{\"value\":1}}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .`,
+		`<s> <http://example.org/geo> "POINT (30 10)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .`,
+		`<s> <http://example.org/description> "A long description"@en .`,
+	} {
+		quad, err := parser.ParseQuad(line)
+		if err != nil {
+			t.Fatalf("ParseQuad(%q): %v", line, err)
+		}
+		m.Add(quad)
+	}
+	for _, datatype := range []string{
+		"integer", "int", "long", "short", "byte", "nonNegativeInteger",
+		"nonPositiveInteger", "positiveInteger", "negativeInteger", "unsignedLong",
+		"unsignedInt", "unsignedShort", "unsignedByte",
+	} {
+		line := `<s> <http://example.org/integer_` + datatype + `> "123"^^<http://www.w3.org/2001/XMLSchema#` + datatype + `> .`
+		quad, err := parser.ParseQuad(line)
+		if err != nil {
+			t.Fatalf("ParseQuad(%q): %v", line, err)
+		}
+		m.Add(quad)
+	}
+	for datatype, value := range map[string]string{
+		"base64Binary": "YWJj",
+		"hexBinary":    "AABB",
+		"QName":        "ns:name",
+		"NMTOKEN":      "name-token",
+	} {
+		m.Add(parser.Quad{Predicate: "http://example.org/keyword_" + datatype, Object: parser.XSDKeyword(value)})
+	}
+	invalidJSON, err := parser.ParseQuad(`<s> <http://example.org/invalid_json> "{invalid"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .`)
+	if err != nil {
+		t.Fatalf("ParseQuad(invalid rdf:JSON): %v", err)
+	}
+	m.Add(invalidJSON)
+
+	output, err := m.Generate()
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("Invalid mapping JSON: %v", err)
+	}
+	props := result["properties"].(map[string]interface{})
+
+	assertMapping := func(field, wantType string) map[string]interface{} {
+		t.Helper()
+		fieldMapping, ok := props[field].(map[string]interface{})
+		if !ok || fieldMapping["type"] != wantType {
+			t.Fatalf("%s mapping = %v, want type %q", field, props[field], wantType)
+		}
+		return fieldMapping
+	}
+
+	decimal := assertMapping("http://example org/decimal", "scaled_float")
+	if decimal["scaling_factor"] != float64(1000) {
+		t.Errorf("decimal scaling_factor = %v, want 1000", decimal["scaling_factor"])
+	}
+	assertMapping("http://example org/mixed", "double")
+	for _, datatype := range []string{
+		"integer", "int", "long", "short", "byte", "nonNegativeInteger",
+		"nonPositiveInteger", "positiveInteger", "negativeInteger", "unsignedLong",
+		"unsignedInt", "unsignedShort", "unsignedByte",
+	} {
+		assertMapping("http://example org/integer_"+datatype, "long")
+	}
+	date := assertMapping("http://example org/time", "text")
+	dateFields := date["fields"].(map[string]interface{})
+	dateField := dateFields["date"].(map[string]interface{})
+	if dateField["type"] != "date" || dateField["ignore_malformed"] != true {
+		t.Errorf("date sub-field = %v, want tolerant date", dateField)
+	}
+	if format, _ := dateField["format"].(string); !strings.Contains(format, "strict_hour_minute_second") || !strings.Contains(format, "epoch_millis") {
+		t.Errorf("date format = %q, want time and epoch formats", format)
+	}
+
+	language := assertMapping("http://example org/language", "keyword")
+	if language["ignore_above"] != float64(256) || language["normalizer"] != "lowercase_normalizer" {
+		t.Errorf("language keyword mapping = %v", language)
+	}
+	assertMapping("http://example org/keyword", "keyword")
+	for _, datatype := range []string{"base64Binary", "hexBinary", "QName", "NMTOKEN"} {
+		assertMapping("http://example org/keyword_"+datatype, "keyword")
+	}
+	assertMapping("http://example org/json", "object")
+	assertMapping("http://example org/invalid_json", "text")
+	geo := assertMapping("http://example org/geo", "geo_shape")
+	if geo["ignore_malformed"] != true {
+		t.Errorf("geo mapping = %v, want ignore_malformed", geo)
+	}
+
+	description := assertMapping("http://example org/description", "text")
+	if description["copy_to"] != "full_text" {
+		t.Errorf("description copy_to = %v, want full_text", description["copy_to"])
+	}
+	if description["analyzer"] != "standard" {
+		t.Errorf("description analyzer = %v, want standard", description["analyzer"])
+	}
+	fullText := assertMapping("full_text", "text")
+	if fullText["analyzer"] != "standard" {
+		t.Errorf("full_text analyzer = %v, want standard", fullText["analyzer"])
+	}
+	if _, ok := fullText["copy_to"]; ok {
+		t.Errorf("copy-to target must not copy to itself: %v", fullText)
+	}
+	if _, ok := result["settings"]; ok {
+		t.Fatal("Generate should not include index settings")
+	}
+
+	config, err := m.GenerateConfig()
+	if err != nil {
+		t.Fatalf("GenerateConfig failed: %v", err)
+	}
+	var configDoc map[string]interface{}
+	if err := json.Unmarshal(config, &configDoc); err != nil {
+		t.Fatalf("Invalid config JSON: %v", err)
+	}
+	analysis := configDoc["settings"].(map[string]interface{})["analysis"].(map[string]interface{})
+	normalizers := analysis["normalizer"].(map[string]interface{})
+	if normalizers["lowercase_normalizer"] == nil {
+		t.Fatalf("normalizer missing from settings: %v", analysis)
+	}
+}
+
+func TestMapper_GenerateOptionDisables(t *testing.T) {
+	options := mapping.DefaultOptions()
+	options.TextKeywordSubfield = false
+	options.KeywordIgnoreAbove = 0
+	options.IgnoreMalformedGeo = false
+	m := mapping.NewMapper(options)
+	m.Add(parser.Quad{Predicate: "http://example.org/text", Object: "a long enough description"})
+	m.Add(parser.Quad{Predicate: "http://example.org/geo", Object: parser.GeoWKT("POINT (30 10)")})
+
+	output, err := m.Generate()
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("Invalid mapping JSON: %v", err)
+	}
+	props := result["properties"].(map[string]interface{})
+	text := props["http://example org/text"].(map[string]interface{})
+	if _, ok := text["fields"]; ok {
+		t.Errorf("text mapping unexpectedly has keyword sub-fields: %v", text["fields"])
+	}
+	geo := props["http://example org/geo"].(map[string]interface{})
+	if _, ok := geo["ignore_malformed"]; ok {
+		t.Errorf("geo ignore_malformed should be omitted when disabled: %v", geo)
+	}
+}
+
+func TestMapper_GenerateCopyToConflict(t *testing.T) {
+	options := mapping.DefaultOptions()
+	options.CopyTo = "full_text"
+	m := mapping.NewMapper(options)
+	m.Add(parser.Quad{Predicate: "full_text", Object: "source"})
+	if _, err := m.Generate(); err == nil {
+		t.Fatal("expected copy_to target conflict error")
+	}
+}
+
+func TestMapper_AnalyzerTieIsDeterministic(t *testing.T) {
+	quads := []parser.Quad{
+		{Predicate: "http://example.org/description", Object: parser.LangString{Value: "A sufficiently long English description", Lang: "en"}},
+		{Predicate: "http://example.org/description", Object: parser.LangString{Value: "Een voldoende lange Nederlandse omschrijving", Lang: "nl"}},
+	}
+	generate := func(input []parser.Quad) []byte {
+		t.Helper()
+		m := mapping.NewMapper()
+		for _, q := range input {
+			m.Add(q)
+		}
+		output, err := m.Generate()
+		if err != nil {
+			t.Fatalf("Generate failed: %v", err)
+		}
+		return output
+	}
+
+	forward := generate(quads)
+	reversed := generate([]parser.Quad{quads[1], quads[0]})
+	if string(forward) != string(reversed) {
+		t.Fatalf("mapping differs by input order:\nforward: %s\nreversed: %s", forward, reversed)
+	}
+	for i := 0; i < 10; i++ {
+		if got := generate(quads); string(got) != string(forward) {
+			t.Fatalf("repeated generation %d changed mapping:\nfirst: %s\nnext: %s", i, forward, got)
+		}
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(forward, &result); err != nil {
+		t.Fatalf("Invalid mapping JSON: %v", err)
+	}
+	props := result["properties"].(map[string]interface{})
+	description := props["http://example org/description"].(map[string]interface{})
+	if description["analyzer"] != "dutch" {
+		t.Errorf("tied analyzer = %v, want deterministic lexical winner \"dutch\"", description["analyzer"])
 	}
 }

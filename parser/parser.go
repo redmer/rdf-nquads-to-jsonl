@@ -28,8 +28,38 @@ type Date string
 // DateTime represents an xsd:dateTime literal.
 type DateTime string
 
+// XSDTime represents an xsd:time literal.
+type XSDTime string
+
 // AnyURI represents an xsd:anyURI literal.
 type AnyURI string
+
+// XSDLanguage represents an xsd:language literal.
+type XSDLanguage string
+
+// XSDDecimal represents a finite xsd:decimal value.
+type XSDDecimal float64
+
+// XSDKeyword represents an XSD literal that should be indexed as a keyword.
+type XSDKeyword string
+
+// RDFJSON represents an rdf:JSON literal.
+type RDFJSON string
+
+// IsObject reports whether the lexical form is a JSON object.
+func (j RDFJSON) IsObject() bool {
+	var value map[string]interface{}
+	return json.Unmarshal([]byte(j), &value) == nil && value != nil
+}
+
+// MarshalJSON emits a valid JSON object as a nested value and otherwise
+// preserves the literal as a string.
+func (j RDFJSON) MarshalJSON() ([]byte, error) {
+	if j.IsObject() {
+		return json.RawMessage(j), nil
+	}
+	return json.Marshal(string(j))
+}
 
 // RDFHTML represents an rdf:HTML literal.
 type RDFHTML string
@@ -240,7 +270,19 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 						return nil, "", fmt.Errorf("invalid boolean: %q", rawVal)
 					}
 					return b, rest, nil
-				case "http://www.w3.org/2001/XMLSchema#integer", "http://www.w3.org/2001/XMLSchema#int":
+				case "http://www.w3.org/2001/XMLSchema#integer",
+					"http://www.w3.org/2001/XMLSchema#int",
+					"http://www.w3.org/2001/XMLSchema#long",
+					"http://www.w3.org/2001/XMLSchema#short",
+					"http://www.w3.org/2001/XMLSchema#byte",
+					"http://www.w3.org/2001/XMLSchema#nonNegativeInteger",
+					"http://www.w3.org/2001/XMLSchema#nonPositiveInteger",
+					"http://www.w3.org/2001/XMLSchema#positiveInteger",
+					"http://www.w3.org/2001/XMLSchema#negativeInteger",
+					"http://www.w3.org/2001/XMLSchema#unsignedLong",
+					"http://www.w3.org/2001/XMLSchema#unsignedInt",
+					"http://www.w3.org/2001/XMLSchema#unsignedShort",
+					"http://www.w3.org/2001/XMLSchema#unsignedByte":
 					n, err := strconv.ParseInt(rawVal, 10, 64)
 					if err != nil {
 						if errors.Is(err, strconv.ErrRange) {
@@ -253,7 +295,22 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 						return nil, "", fmt.Errorf("invalid integer: %q", rawVal)
 					}
 					return n, rest, nil
-				case "http://www.w3.org/2001/XMLSchema#decimal", "http://www.w3.org/2001/XMLSchema#double", "http://www.w3.org/2001/XMLSchema#float":
+				case "http://www.w3.org/2001/XMLSchema#decimal":
+					f, err := strconv.ParseFloat(rawVal, 64)
+					if err != nil {
+						if rawVal == "INF" || rawVal == "+INF" || rawVal == "-INF" {
+							return rawVal, rest, nil
+						}
+						if errors.Is(err, strconv.ErrRange) && math.IsInf(f, 0) {
+							return rawVal, rest, nil
+						}
+						return nil, "", fmt.Errorf("invalid decimal: %q", rawVal)
+					}
+					if math.IsNaN(f) || math.IsInf(f, 0) {
+						return rawVal, rest, nil
+					}
+					return XSDDecimal(f), rest, nil
+				case "http://www.w3.org/2001/XMLSchema#double", "http://www.w3.org/2001/XMLSchema#float":
 					f, err := strconv.ParseFloat(rawVal, 64)
 					if err != nil {
 						// JSON cannot represent Infinity. Accept the XSD spellings
@@ -285,6 +342,22 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 						return nil, "", err
 					}
 					return dt, rest, nil
+				case "http://www.w3.org/2001/XMLSchema#time":
+					t, err := parseXSDTime(rawVal)
+					if err != nil {
+						return nil, "", err
+					}
+					return t, rest, nil
+				case "http://www.w3.org/2001/XMLSchema#language":
+					return XSDLanguage(rawVal), rest, nil
+				case "http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON":
+					return RDFJSON(rawVal), rest, nil
+				case "http://www.w3.org/2001/XMLSchema#duration",
+					"http://www.w3.org/2001/XMLSchema#base64Binary",
+					"http://www.w3.org/2001/XMLSchema#hexBinary",
+					"http://www.w3.org/2001/XMLSchema#QName",
+					"http://www.w3.org/2001/XMLSchema#NMTOKEN":
+					return XSDKeyword(rawVal), rest, nil
 				case "http://www.w3.org/2001/XMLSchema#anyURI":
 					return AnyURI(rawVal), rest, nil
 				case "http://www.opengis.net/ont/geosparql#wktLiteral":
@@ -327,4 +400,18 @@ func parseXSDDateTime(v string) (DateTime, error) {
 		}
 	}
 	return "", fmt.Errorf("invalid dateTime: %q", v)
+}
+
+func parseXSDTime(v string) (XSDTime, error) {
+	for _, layout := range []string{
+		"15:04:05",
+		"15:04:05.999999999",
+		"15:04:05Z07:00",
+		"15:04:05.999999999Z07:00",
+	} {
+		if _, err := time.Parse(layout, v); err == nil {
+			return XSDTime(v), nil
+		}
+	}
+	return "", fmt.Errorf("invalid time: %q", v)
 }
