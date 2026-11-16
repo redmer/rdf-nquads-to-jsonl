@@ -378,6 +378,7 @@ func TestMapper_GenerateDatatypeAndOptionMappings(t *testing.T) {
 		`<s> <http://example.org/language> "en"^^<http://www.w3.org/2001/XMLSchema#language> .`,
 		`<s> <http://example.org/keyword> "P1Y"^^<http://www.w3.org/2001/XMLSchema#duration> .`,
 		`<s> <http://example.org/json> "{\"nested\":{\"value\":1}}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .`,
+		`<s> <http://example.org/json> "plain scalar" .`,
 		`<s> <http://example.org/geo> "POINT (30 10)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .`,
 		`<s> <http://example.org/description> "A long description"@en .`,
 	} {
@@ -462,7 +463,7 @@ func TestMapper_GenerateDatatypeAndOptionMappings(t *testing.T) {
 	for _, datatype := range []string{"base64Binary", "hexBinary", "QName", "NMTOKEN"} {
 		assertMapping("http://example org/keyword_"+datatype, "keyword")
 	}
-	assertMapping("http://example org/json", "object")
+	assertMapping("http://example org/json", "text")
 	assertMapping("http://example org/invalid_json", "text")
 	geo := assertMapping("http://example org/geo", "geo_shape")
 	if geo["ignore_malformed"] != true {

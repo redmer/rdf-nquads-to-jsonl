@@ -59,7 +59,7 @@ func TestGrouper(t *testing.T) {
 	}
 }
 
-func TestRDFJSONSurvivesDocumentEmission(t *testing.T) {
+func TestRDFJSONEmittedAsString(t *testing.T) {
 	quad, err := parser.ParseQuad(`<https://example.org/s> <https://example.org/data> "{\"nested\":{\"value\":1}}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .`)
 	if err != nil {
 		t.Fatalf("ParseQuad failed: %v", err)
@@ -86,9 +86,9 @@ func TestRDFJSONSurvivesDocumentEmission(t *testing.T) {
 	if !ok || len(values) != 1 {
 		t.Fatalf("data = %#v, want a one-element array", got["https://example org/data"])
 	}
-	nested, ok := values[0].(map[string]interface{})
-	if !ok || nested["nested"] == nil {
-		t.Fatalf("data value = %#v, want nested JSON object", values[0])
+	str, ok := values[0].(string)
+	if !ok || str != `{"nested":{"value":1}}` {
+		t.Fatalf("data value = %#v, want the rdf:JSON lexical form as a string", values[0])
 	}
 }
 

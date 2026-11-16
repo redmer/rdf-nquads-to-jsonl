@@ -46,18 +46,11 @@ type XSDKeyword string
 // RDFJSON represents an rdf:JSON literal.
 type RDFJSON string
 
-// IsObject reports whether the lexical form is a JSON object.
-func (j RDFJSON) IsObject() bool {
-	var value map[string]json.RawMessage
-	return json.Unmarshal([]byte(j), &value) == nil && value != nil
-}
-
-// MarshalJSON emits a valid JSON object as a nested value and otherwise
-// preserves the literal as a string.
+// MarshalJSON emits the literal as a plain JSON string, keeping the lexical
+// form verbatim. A predicate can mix rdf:JSON objects with plain scalars, and
+// Elasticsearch cannot map one field as both object and text, so rdf:JSON
+// is always emitted as a string to stay consistent with the inferred mapping.
 func (j RDFJSON) MarshalJSON() ([]byte, error) {
-	if j.IsObject() {
-		return json.RawMessage(j), nil
-	}
 	return json.Marshal(string(j))
 }
 

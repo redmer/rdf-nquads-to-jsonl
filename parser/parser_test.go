@@ -422,7 +422,7 @@ func TestRDFJSONMarshalJSON(t *testing.T) {
 		in   parser.RDFJSON
 		want string
 	}{
-		{"object", `{"nested":{"value":1}}`, `{"nested":{"value":1}}`},
+		{"object", `{"nested":{"value":1}}`, `"{\"nested\":{\"value\":1}}"`},
 		{"invalid JSON", `{invalid`, `"{invalid"`},
 		{"array", `[1,2]`, `"[1,2]"`},
 	}

@@ -17,7 +17,6 @@ const (
 	TypeDecimal
 	TypeDouble
 	TypeDate
-	TypeObject
 	TypeText
 	TypeKeyword
 	TypeGeoShape
@@ -135,10 +134,10 @@ func inferType(obj interface{}) (fieldType FieldType, hasStringLike bool, lang s
 		return TypeKeyword, false, "", false, 0
 	case parser.XSDLanguage, parser.XSDKeyword:
 		return TypeKeyword, false, "", false, 0
+	// rdf:JSON is treated as a plain string: documents emit it as its
+	// lexical form, so the mapping must too (a predicate can mix rdf:JSON
+	// objects with scalars, which no single Elasticsearch field type can hold).
 	case parser.RDFJSON:
-		if obj.IsObject() {
-			return TypeObject, false, "", false, 0
-		}
 		return TypeUnknown, true, "", false, len(obj)
 	case parser.GeoWKT, parser.GeoJSON:
 		return TypeGeoShape, false, "", false, 0
@@ -363,8 +362,6 @@ func (m *Mapper) Generate() ([]byte, error) {
 			}
 		case TypeKeyword:
 			mapping = m.keywordMapping()
-		case TypeObject:
-			mapping = map[string]interface{}{"type": "object"}
 		case TypeGeoShape:
 			mapping = map[string]interface{}{"type": "geo_shape"}
 			if m.options.IgnoreMalformedGeo {

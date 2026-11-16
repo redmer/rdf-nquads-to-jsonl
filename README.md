@@ -114,14 +114,14 @@ Each Subject becomes one Elasticsearch document:
 
 - The `_id` is the Subject URI. Elasticsearch rejects `_id` values longer than 512 bytes, so longer Subject URIs are truncated to fit: the first `max-65` bytes are kept (cut at a UTF-8 rune boundary), followed by a `^` separator and the 64-character hex SHA-256 of the full URI. `^` cannot occur in an IRI (RFC 3987), so a truncated `_id` can never collide with an unmodified Subject. Use `-id-max-bytes` to change the limit; `0` disables it. Values between 1 and 64 are rejected at startup, because they would truncate the SHA-256 suffix itself and make distinct long subjects collide.
 - Predicate URIs are used as field keys with `.` replaced by ` ` (space) -- periods are special in ElasticSearch fields.
-- All predicate values are arrays of JSON values (strings, numbers, booleans, or objects).
+- All predicate values are arrays of JSON values (strings, numbers, or booleans).
 - Language-tagged strings become plain strings.
 - Numbers and boolean datatype become JSON numbers and booleans.
 - The XSD integer family (`integer`, `int`, `long`, `short`, `byte`, and the signed/unsigned constrained integer types) becomes JSON integers when in `int64` range, then falls back to floating point or its lexical string for larger values.
 - `xsd:decimal` values become JSON numbers and map to `scaled_float` with `-decimal-scaling-factor` (default `10000`). A field that also contains `xsd:float` or `xsd:double` maps to `double`.
 - `xsd:date`, `xsd:dateTime`, and `xsd:time` literals are treated as dates for mapping generation. Generated date formats accept strict date/time values and `epoch_millis`.
 - `xsd:language`, `xsd:duration`, `xsd:base64Binary`, `xsd:hexBinary`, `xsd:QName`, and `xsd:NMTOKEN` map to `keyword`.
-- `rdf:JSON` object literals are emitted as nested JSON objects and map to `object`; invalid JSON and non-object JSON values remain strings.
+- `rdf:JSON` literals are always emitted as plain strings holding the lexical form, and map to `text` like other string literals. A predicate may mix `rdf:JSON` objects with scalar values, and Elasticsearch cannot map one field as both `object` and a scalar type, so a consistent string representation is used.
 - `xsd:anyURI` literals are treated as keyword values for mapping generation.
 - `rdf:HTML` literals map to `text` with the `html_strip` analyzer; `-generate-config` defines that custom analyzer under `settings.analysis.analyzer.html_strip` (HTML char filter + standard tokenizer), so it is in place when the index is created.
 - `geosparql:wktLiteral` and `geosparql:geoJSONLiteral` map to `geo_shape`.
