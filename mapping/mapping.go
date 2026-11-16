@@ -418,7 +418,7 @@ func (m *Mapper) Generate() ([]byte, error) {
 func (m *Mapper) dateMapping() map[string]interface{} {
 	return map[string]interface{}{
 		"type":   "date",
-		"format": "strict_date_optional_time||strict_date||strict_hour_minute_second||strict_hour_minute_second_fraction||epoch_millis",
+		"format": "strict_date_optional_time||strict_date||strict_hour_minute_second||strict_hour_minute_second_fraction||strict_time_no_millis||strict_time||epoch_millis",
 	}
 }
 
