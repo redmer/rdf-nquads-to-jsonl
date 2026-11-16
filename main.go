@@ -97,7 +97,7 @@ func RunMapping(config bool) error {
 
 func RunProcessor(includes, excludes map[string]bool) error {
 	if *idMaxBytes < 0 || (*idMaxBytes > 0 && *idMaxBytes < processor.MinMaxIDBytes) {
-		return fmt.Errorf("invalid -id-max-bytes %d: use 0 to disable the limit, or a value of at least %d bytes ('-' + 64-char SHA-256 suffix)", *idMaxBytes, processor.MinMaxIDBytes)
+		return fmt.Errorf("invalid -id-max-bytes %d: use 0 to disable the limit, or a value of at least %d bytes (separator + 64-char SHA-256 suffix)", *idMaxBytes, processor.MinMaxIDBytes)
 	}
 
 	var indexErr error

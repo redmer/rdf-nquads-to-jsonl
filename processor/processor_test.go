@@ -255,8 +255,32 @@ func TestGrouperMaxIDBytesBelowMinimumClamped(t *testing.T) {
 	}
 	sum := sha256.Sum256([]byte(longSubject))
 	wantDigest := hex.EncodeToString(sum[:])
-	if !strings.HasSuffix(id, "-"+wantDigest) {
-		t.Errorf("ID %q does not end with the full SHA-256 digest of the subject", id[:20])
+	// The separator is "^", which cannot appear in an IRI.
+	if !strings.HasSuffix(id, "^"+wantDigest) {
+		t.Errorf("ID %q does not end with the separator + full SHA-256 digest of the subject", id[:20])
+	}
+}
+
+// TestGrouperProtectedIDDisjointFromSubjects verifies that a protected _id
+// always contains the "^" separator, which RFC 3987 excludes from IRIs. A
+// shortened ID can therefore never equal an unmodified Subject, so long and
+// short subjects cannot collide.
+func TestGrouperProtectedIDDisjointFromSubjects(t *testing.T) {
+	longSubject := "http://example.org/" + strings.Repeat("a", 1000)
+	quad := parser.Quad{Subject: longSubject, Predicate: "http://example.org/p", Object: "val"}
+
+	var docs []processor.Document
+	g := processor.NewGrouper(func(doc processor.Document) {
+		docs = append(docs, doc)
+	})
+	g.Add(quad)
+	g.Flush()
+
+	if len(docs) != 1 {
+		t.Fatalf("expected 1 document, got %d", len(docs))
+	}
+	if !strings.Contains(docs[0].ID, "^") {
+		t.Errorf("protected ID %q... lacks the separator that keeps it disjoint from real subjects", docs[0].ID[:40])
 	}
 }
 

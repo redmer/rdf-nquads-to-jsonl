@@ -14,17 +14,25 @@ import (
 // Elasticsearch rejects _id values longer than 512 bytes.
 const DefaultMaxIDBytes = 512
 
-// MinMaxIDBytes is the smallest useful -id-max-bytes value: room for the '-'
+// idSeparator joins the retained prefix and the digest in a protected _id.
+// It is "^", which RFC 3987 excludes from IRIs (it must be percent-encoded),
+// so it can never occur in a Subject. A protected _id therefore always
+// differs from every unchanged short Subject, making the scheme
+// collision-free between shortened and unshortened IDs. Elasticsearch
+// accepts "^" in _id values.
+const idSeparator = "^"
+
+// MinMaxIDBytes is the smallest useful -id-max-bytes value: room for the
 // separator plus the full 64-character hex SHA-256 digest. Smaller positive
 // values would truncate the digest itself, making distinct long subjects
 // collide, so they are rejected in main.
-const MinMaxIDBytes = 1 + 64
+const MinMaxIDBytes = len(idSeparator) + 64
 
 // protectID returns id unchanged when it fits within maxBytes. Otherwise it
 // returns a deterministic, collision-resistant value that fits: a truncated
-// prefix of the id followed by "-" and the hex SHA-256 of the full id, kept
-// within the byte budget. maxBytes <= 0 means no limit; otherwise maxBytes
-// must be >= MinMaxIDBytes so the digest is never truncated.
+// prefix of the id followed by idSeparator and the hex SHA-256 of the full
+// id, kept within the byte budget. maxBytes <= 0 means no limit; otherwise
+// maxBytes must be >= MinMaxIDBytes so the digest is never truncated.
 func protectID(id string, maxBytes int) string {
 	if maxBytes <= 0 || len(id) <= maxBytes {
 		return id
@@ -34,7 +42,7 @@ func protectID(id string, maxBytes int) string {
 	prefixLen := maxBytes - MinMaxIDBytes
 	// Drop any partial UTF-8 rune at the cut so JSON marshaling cannot replace
 	// it with U+FFFD and inflate the _id past the limit.
-	return strings.ToValidUTF8(id[:prefixLen], "") + "-" + digest
+	return strings.ToValidUTF8(id[:prefixLen], "") + idSeparator + digest
 }
 
 // Document represents a single Elasticsearch document ready for indexing.

@@ -90,7 +90,7 @@ Each Subject becomes one Elasticsearch document:
 }
 ```
 
-- The `_id` is the Subject URI. Elasticsearch rejects `_id` values longer than 512 bytes, so longer Subject URIs are truncated to fit: the first `max-65` bytes are kept (cut at a UTF-8 rune boundary), followed by `-` and the 64-character hex SHA-256 of the full URI. Use `-id-max-bytes` to change the limit; `0` disables it. Values between 1 and 64 are rejected at startup, because they would truncate the SHA-256 suffix itself and make distinct long subjects collide.
+- The `_id` is the Subject URI. Elasticsearch rejects `_id` values longer than 512 bytes, so longer Subject URIs are truncated to fit: the first `max-65` bytes are kept (cut at a UTF-8 rune boundary), followed by a `^` separator and the 64-character hex SHA-256 of the full URI. `^` cannot occur in an IRI (RFC 3987), so a truncated `_id` can never collide with an unmodified Subject. Use `-id-max-bytes` to change the limit; `0` disables it. Values between 1 and 64 are rejected at startup, because they would truncate the SHA-256 suffix itself and make distinct long subjects collide.
 - Predicate URIs are used as field keys with `.` replaced by ` ` (space) -- periods are special in ElasticSearch fields.
 - All values are arrays of strings.
 - Language-tagged strings become plain strings.
