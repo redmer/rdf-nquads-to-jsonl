@@ -386,14 +386,24 @@ func parseXSDDateTime(v string) (DateTime, error) {
 }
 
 func parseXSDTime(v string) (XSDTime, error) {
+	lexical := v
+	if strings.HasPrefix(v, "24:00:00") {
+		suffix := v[len("24:00:00"):]
+		if strings.HasPrefix(suffix, ".") {
+			suffix = strings.TrimLeft(suffix[1:], "0")
+		}
+		if suffix == "" || suffix == "Z" || strings.HasPrefix(suffix, "+") || strings.HasPrefix(suffix, "-") {
+			lexical = "00" + v[2:]
+		}
+	}
 	for _, layout := range []string{
 		"15:04:05",
 		"15:04:05.999999999",
 		"15:04:05Z07:00",
 		"15:04:05.999999999Z07:00",
 	} {
-		if _, err := time.Parse(layout, v); err == nil {
-			return XSDTime(v), nil
+		if _, err := time.Parse(layout, lexical); err == nil {
+			return XSDTime(lexical), nil
 		}
 	}
 	return "", fmt.Errorf("invalid time: %q", v)
