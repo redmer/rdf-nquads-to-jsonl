@@ -48,7 +48,7 @@ type RDFJSON string
 
 // IsObject reports whether the lexical form is a JSON object.
 func (j RDFJSON) IsObject() bool {
-	var value map[string]interface{}
+	var value map[string]json.RawMessage
 	return json.Unmarshal([]byte(j), &value) == nil && value != nil
 }
 
