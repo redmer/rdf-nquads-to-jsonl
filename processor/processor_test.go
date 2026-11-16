@@ -59,7 +59,7 @@ func TestGrouper(t *testing.T) {
 	}
 }
 
-func TestRDFJSONEmittedAsString(t *testing.T) {
+func TestRDFJSONLiteralEmittedAsString(t *testing.T) {
 	quad, err := parser.ParseQuad(`<https://example.org/s> <https://example.org/data> "{\"nested\":{\"value\":1}}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .`)
 	if err != nil {
 		t.Fatalf("ParseQuad failed: %v", err)

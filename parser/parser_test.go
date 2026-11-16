@@ -416,25 +416,17 @@ func TestXSDTimeAndKeywordDatatypes(t *testing.T) {
 	}
 }
 
-func TestRDFJSONMarshalJSON(t *testing.T) {
-	tests := []struct {
-		name string
-		in   parser.RDFJSON
-		want string
-	}{
-		{"object", `{"nested":{"value":1}}`, `"{\"nested\":{\"value\":1}}"`},
-		{"invalid JSON", `{invalid`, `"{invalid"`},
-		{"array", `[1,2]`, `"[1,2]"`},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := json.Marshal(tt.in)
-			if err != nil {
-				t.Fatalf("Marshal failed: %v", err)
-			}
-			if string(got) != tt.want {
-				t.Fatalf("JSON = %s, want %s", got, tt.want)
-			}
-		})
+func TestRDFJSONParsesToPlainString(t *testing.T) {
+	// rdf:JSON has no dedicated representation: the lexical form is kept as a
+	// plain string so a predicate can mix rdf:JSON objects with scalars and
+	// still map to a single Elasticsearch field type.
+	for _, value := range []string{`{"nested":{"value":1}}`, `{invalid`, `[1,2]`} {
+		quad, err := parser.ParseQuad(`<s> <p> "` + strings.ReplaceAll(value, `"`, `\"`) + `"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .`)
+		if err != nil {
+			t.Fatalf("ParseQuad failed: %v", err)
+		}
+		if got, ok := quad.Object.(string); !ok || got != value {
+			t.Fatalf("object = %#v (%T), want string %q", quad.Object, quad.Object, value)
+		}
 	}
 }

@@ -43,17 +43,6 @@ type XSDDecimal float64
 // XSDKeyword represents an XSD literal that should be indexed as a keyword.
 type XSDKeyword string
 
-// RDFJSON represents an rdf:JSON literal.
-type RDFJSON string
-
-// MarshalJSON emits the literal as a plain JSON string, keeping the lexical
-// form verbatim. A predicate can mix rdf:JSON objects with plain scalars, and
-// Elasticsearch cannot map one field as both object and text, so rdf:JSON
-// is always emitted as a string to stay consistent with the inferred mapping.
-func (j RDFJSON) MarshalJSON() ([]byte, error) {
-	return json.Marshal(string(j))
-}
-
 // RDFHTML represents an rdf:HTML literal.
 type RDFHTML string
 
@@ -343,8 +332,9 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 					return t, rest, nil
 				case "http://www.w3.org/2001/XMLSchema#language":
 					return XSDLanguage(rawVal), rest, nil
-				case "http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON":
-					return RDFJSON(rawVal), rest, nil
+				// rdf:JSON has no dedicated representation: the lexical form is
+				// kept as a plain string so a predicate can mix rdf:JSON objects
+				// with scalars and still map to a single Elasticsearch field type.
 				case "http://www.w3.org/2001/XMLSchema#duration",
 					"http://www.w3.org/2001/XMLSchema#base64Binary",
 					"http://www.w3.org/2001/XMLSchema#hexBinary",
