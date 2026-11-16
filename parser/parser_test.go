@@ -1,6 +1,8 @@
 package parser_test
 
 import (
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -190,6 +192,55 @@ func TestParseQuad(t *testing.T) {
 			wantSubj: "http://example.org/" + strings.Repeat("path/", 2000) + "s",
 			wantPred: "http://example.org/p",
 			wantObj:  "val",
+		},
+		{
+			name:     "xsd:double NaN stays a string",
+			line:     `<http://example.org/s> <http://example.org/p> "NaN"^^<http://www.w3.org/2001/XMLSchema#double> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  "NaN",
+		},
+		{
+			name:     "xsd:float INF stays a string",
+			line:     `<http://example.org/s> <http://example.org/p> "INF"^^<http://www.w3.org/2001/XMLSchema#float> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  "INF",
+		},
+		{
+			name:     "xsd:decimal -INF stays a string",
+			line:     `<http://example.org/s> <http://example.org/p> "-INF"^^<http://www.w3.org/2001/XMLSchema#decimal> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  "-INF",
+		},
+		{
+			name:     "xsd:double +INF stays a string",
+			line:     `<http://example.org/s> <http://example.org/p> "+INF"^^<http://www.w3.org/2001/XMLSchema#double> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  "+INF",
+		},
+		{
+			name:     "xsd:double overflowing float64 stays a string",
+			line:     `<http://example.org/s> <http://example.org/p> "1e999"^^<http://www.w3.org/2001/XMLSchema#double> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  "1e999",
+		},
+		{
+			name:     "integer overflowing int64 falls back to float",
+			line:     `<http://example.org/s> <http://example.org/p> "9223372036854775808"^^<http://www.w3.org/2001/XMLSchema#integer> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  float64(9223372036854775808),
+		},
+		{
+			name:     "integer so large it overflows float64 stays a string",
+			line:     `<http://example.org/s> <http://example.org/p> "` + strings.Repeat("9", 400) + `"^^<http://www.w3.org/2001/XMLSchema#integer> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  strings.Repeat("9", 400),
 		}}
 
 	for _, tt := range tests {
@@ -215,6 +266,69 @@ func TestParseQuad(t *testing.T) {
 			}
 			if quad.Graph != tt.wantGraph {
 				t.Errorf("Graph = %q, want %q", quad.Graph, tt.wantGraph)
+			}
+		})
+	}
+}
+
+func TestGeoJSONMarshalJSON(t *testing.T) {
+	tests := []struct {
+		name  string
+		input parser.GeoJSON
+		// wantObj is set when the literal should marshal as a JSON object
+		wantObj map[string]interface{}
+		// wantStr is set when the literal should marshal as a plain JSON string
+		wantStr string
+	}{
+		{
+			name:    "valid GeoJSON object",
+			input:   parser.GeoJSON(`{"type":"Point","coordinates":[30,10]}`),
+			wantObj: map[string]interface{}{"type": "Point", "coordinates": []interface{}{30.0, 10.0}},
+		},
+		{
+			name:    "precision loss int GeoJSON object",
+			input:   parser.GeoJSON(`{"type":"Point","coordinates":[9007199254740993,10]}`),
+			wantObj: map[string]interface{}{"type": "Point", "coordinates": []interface{}{9007199254740993.0, 10.0}},
+		},
+		{
+			name:    "WKT-like value stays a string",
+			input:   parser.GeoJSON("POINT (30 10)"),
+			wantStr: "POINT (30 10)",
+		},
+		{
+			name:    "JSON array is not an object, stays a string",
+			input:   parser.GeoJSON(`[1,2,3]`),
+			wantStr: "[1,2,3]",
+		},
+		{
+			name:    "JSON null is not an object, stays a string",
+			input:   parser.GeoJSON(`null`),
+			wantStr: "null",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := json.Marshal(tt.input)
+			if err != nil {
+				t.Fatalf("Marshal failed: %v", err)
+			}
+			if tt.wantObj != nil {
+				var got map[string]interface{}
+				if err := json.Unmarshal(b, &got); err != nil {
+					t.Fatalf("expected JSON object, got %q: %v", b, err)
+				}
+				if !reflect.DeepEqual(got, tt.wantObj) {
+					t.Errorf("got %v, want %v", got, tt.wantObj)
+				}
+			} else {
+				var got string
+				if err := json.Unmarshal(b, &got); err != nil {
+					t.Fatalf("expected JSON string, got %q: %v", b, err)
+				}
+				if got != tt.wantStr {
+					t.Errorf("got %q, want %q", got, tt.wantStr)
+				}
 			}
 		})
 	}

@@ -2,6 +2,7 @@ package mapping
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/redmer/rdf-nquads-to-jsonl/parser"
@@ -141,7 +142,7 @@ var analyzerByLang = map[string]string{
 	"it":    "italian",
 	"ja":    "cjk",
 	"ko":    "cjk",
-	"ku":    "sorani", // is this the right key?
+	"ku":    "sorani", // Central Kurdish
 	"lt":    "lithuanian",
 	"lv":    "latvian",
 	"nl":    "dutch",
@@ -255,7 +256,27 @@ func inferStringFieldType(profile *fieldProfile) FieldType {
 	return TypeText
 }
 
-// Generate produces the Elasticsearch mapping JSON.
+// Settings is the index-creation settings body defining the custom
+// html_strip analyzer referenced by rdf:HTML fields. It is constant and
+// data-independent: analyzer definitions can only be applied when an index
+// is created (or while it is closed), so they cannot travel in the mapping
+// body passed to PUT /<index>/_mapping (e.g. via `esbulk -mapping`).
+var Settings = map[string]interface{}{
+	"analysis": map[string]interface{}{
+		"analyzer": map[string]interface{}{
+			"html_strip": map[string]interface{}{
+				"type":        "custom",
+				"char_filter": []interface{}{"html_strip"},
+				"tokenizer":   "standard",
+			},
+		},
+	},
+}
+
+// Generate produces the Elasticsearch mapping JSON. The output is
+// mapping-only (no top-level "settings") so it can be sent to
+// PUT /<index>/_mapping, as `esbulk -mapping` does. Use GenerateConfig for a
+// full index-creation body that also defines the analyzers.
 func (m *Mapper) Generate() ([]byte, error) {
 	properties := make(map[string]interface{})
 
@@ -294,10 +315,15 @@ func (m *Mapper) Generate() ([]byte, error) {
 			mapping = map[string]interface{}{"type": "geo_shape"}
 		case TypeText:
 			mapping = map[string]interface{}{"type": "text"}
-			if m.textAnalyzer != "" {
+			switch {
+			case profile.hasRDFHTML:
+				mapping["analyzer"] = "html_strip"
+			case m.textAnalyzer != "":
 				mapping["analyzer"] = m.textAnalyzer
-			} else if analyzer := inferAnalyzer(profile); analyzer != "" {
-				mapping["analyzer"] = analyzer
+			default:
+				if analyzer := inferAnalyzer(profile); analyzer != "" {
+					mapping["analyzer"] = analyzer
+				}
 			}
 		default:
 			// Fallback
@@ -316,8 +342,45 @@ func (m *Mapper) Generate() ([]byte, error) {
 	// We do NOT wrap this in "mappings" because tools like esbulk expect
 	// the mapping definition directly (which starts with "properties").
 	result := map[string]interface{}{
+		// Fields not covered by an explicit property above are dynamic.
+		// Map dynamically detected strings to keyword so they stay aggregatable
+		// instead of being indexed as analyzed text.
+		"dynamic_templates": []interface{}{
+			map[string]interface{}{
+				"strings_as_keyword": map[string]interface{}{
+					"match_mapping_type": "string",
+					"mapping": map[string]interface{}{
+						"type": "keyword",
+					},
+				},
+			},
+		},
 		"properties": properties,
 	}
 
 	return json.MarshalIndent(result, "", "  ")
+}
+
+// GenerateConfig produces a complete Elasticsearch index-creation body:
+// the generated mapping plus the settings defining the html_strip analyzer.
+// Feed it to `esbulk -c` so the analyzer is defined when the index is
+// created. The settings are included unconditionally because analyzer
+// definitions cannot be added to a live index, so omitting them when no
+// rdf:HTML field was detected would leave no way to add such a field later
+// without recreating the index.
+func (m *Mapper) GenerateConfig() ([]byte, error) {
+	mappingJSON, err := m.Generate()
+	if err != nil {
+		return nil, err
+	}
+
+	var mappingDoc map[string]interface{}
+	if err := json.Unmarshal(mappingJSON, &mappingDoc); err != nil {
+		return nil, fmt.Errorf("unmarshaling generated mapping: %w", err)
+	}
+
+	return json.MarshalIndent(map[string]interface{}{
+		"settings": Settings,
+		"mappings": mappingDoc,
+	}, "", "  ")
 }

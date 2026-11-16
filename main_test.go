@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -160,9 +161,9 @@ func TestFiltering(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-// Redirect stdin
-oldStdin := os.Stdin
-r, w, _ := os.Pipe()
+			// Redirect stdin
+			oldStdin := os.Stdin
+			r, w, _ := os.Pipe()
 			os.Stdin = r
 			go func() {
 				w.Write([]byte(input))
@@ -217,5 +218,100 @@ r, w, _ := os.Pipe()
 				}
 			}
 		})
+	}
+}
+
+// TestIDMaxBytesTooSmallRejected verifies that a positive -id-max-bytes
+// below the minimum useful limit is rejected instead of truncating the
+// SHA-256 digest (which would make distinct long subjects collide).
+func TestIDMaxBytesTooSmallRejected(t *testing.T) {
+	oldMax := *idMaxBytes
+	defer func() { *idMaxBytes = oldMax }()
+
+	for _, v := range []int{-1, 1, 64} {
+		*idMaxBytes = v
+		if err := RunProcessor(nil, nil); err == nil {
+			t.Errorf("RunProcessor with -id-max-bytes=%d: expected error, got nil", v)
+		}
+	}
+
+	// 0 (disabled) and the minimum must be accepted.
+	for _, v := range []int{0, 65, 512} {
+		*idMaxBytes = v
+		oldStdin := os.Stdin
+		r, w, _ := os.Pipe()
+		os.Stdin = r
+		go func() {
+			w.Write([]byte("<http://ex.org/s> <http://ex.org/p> \"o\" .\n"))
+			w.Close()
+		}()
+		oldStdout := os.Stdout
+		rOut, wOut, _ := os.Pipe()
+		os.Stdout = wOut
+		go func() {
+			io.Copy(io.Discard, rOut)
+		}()
+		if err := RunProcessor(nil, nil); err != nil {
+			t.Errorf("RunProcessor with -id-max-bytes=%d: unexpected error: %v", v, err)
+		}
+		wOut.Close()
+		os.Stdin = oldStdin
+		os.Stdout = oldStdout
+	}
+}
+
+// TestLongSubjectIDProtection verifies that subject URIs longer than the
+// Elasticsearch _id limit (512 bytes) are truncated with a SHA-256 suffix.
+func TestLongSubjectIDProtection(t *testing.T) {
+	longSubject := "<http://example.org/" + strings.Repeat("a", 1000) + ">"
+	input := longSubject + ` <http://example.org/p> "val" .` + "\n"
+
+	oldStdin := os.Stdin
+	r, w, _ := os.Pipe()
+	os.Stdin = r
+	go func() {
+		w.Write([]byte(input))
+		w.Close()
+	}()
+
+	oldStdout := os.Stdout
+	rOut, wOut, _ := os.Pipe()
+	os.Stdout = wOut
+
+	var buf bytes.Buffer
+	outDone := make(chan struct{})
+	go func() {
+		buf.ReadFrom(rOut)
+		close(outDone)
+	}()
+
+	oldMax := *idMaxBytes
+	*idMaxBytes = 512
+	defer func() { *idMaxBytes = oldMax }()
+
+	if err := RunProcessor(nil, nil); err != nil {
+		t.Fatalf("Processing failed: %v", err)
+	}
+
+	wOut.Close()
+	<-outDone
+	os.Stdin = oldStdin
+	os.Stdout = oldStdout
+
+	line := strings.TrimSpace(buf.String())
+	if line == "" {
+		t.Fatal("no output produced")
+	}
+	var doc struct {
+		ID string `json:"_id"`
+	}
+	if err := json.Unmarshal([]byte(line), &doc); err != nil {
+		t.Fatalf("Invalid JSON output: %v", err)
+	}
+	if len(doc.ID) > 512 {
+		t.Errorf("_id length = %d bytes, want <= 512", len(doc.ID))
+	}
+	if doc.ID == "http://example.org/"+strings.Repeat("a", 1000) {
+		t.Errorf("_id was not protected, expected truncation with hash suffix")
 	}
 }

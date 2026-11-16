@@ -16,18 +16,27 @@ import (
 )
 
 var generateMapping = flag.Bool("generate-mapping", false, "Generate Elasticsearch mapping from input")
+var generateConfig = flag.Bool("generate-config", false, "Generate Elasticsearch index-creation body (settings + mappings) from input, for use with esbulk -c")
 var includeGraphs = flag.String("include", "", "Comma-separated list of graph URIs to include (allowlist)")
 var excludeGraphs = flag.String("exclude", "", "Comma-separated list of graph URIs to exclude (blocklist)")
 var textAnalyzer = flag.String("text-analyzer", "", "Elasticsearch analyzer to apply to inferred text fields (overrides language-based inference)")
+var idMaxBytes = flag.Int("id-max-bytes", processor.DefaultMaxIDBytes, fmt.Sprintf("Maximum byte length of emitted document _id values; longer Subject URIs are truncated with a SHA-256 suffix. 0 disables the limit; values below %d are rejected", processor.MinMaxIDBytes))
 
 func main() {
 	flag.Parse()
 
-	if *generateMapping {
-		if err := RunMapping(); err != nil {
+	switch {
+	case *generateMapping && *generateConfig:
+		log.Fatal("-generate-mapping and -generate-config are mutually exclusive")
+	case *generateMapping:
+		if err := RunMapping(false); err != nil {
 			log.Fatalf("mapping error: %v", err)
 		}
-	} else {
+	case *generateConfig:
+		if err := RunMapping(true); err != nil {
+			log.Fatalf("config error: %v", err)
+		}
+	default:
 		includes := parseGraphList(*includeGraphs)
 		excludes := parseGraphList(*excludeGraphs)
 		if err := RunProcessor(includes, excludes); err != nil {
@@ -47,7 +56,7 @@ func parseGraphList(list string) map[string]bool {
 	return res
 }
 
-func RunMapping() error {
+func RunMapping(config bool) error {
 	mapper := mapping.NewMapper()
 	mapper.SetTextAnalyzer(*textAnalyzer)
 	reader := bufio.NewReader(os.Stdin)
@@ -71,9 +80,15 @@ func RunMapping() error {
 		}
 	}
 
-	result, err := mapper.Generate()
+	var result []byte
+	var err error
+	if config {
+		result, err = mapper.GenerateConfig()
+	} else {
+		result, err = mapper.Generate()
+	}
 	if err != nil {
-		return fmt.Errorf("generating mapping: %w", err)
+		return fmt.Errorf("generating output: %w", err)
 	}
 
 	_, err = os.Stdout.Write(result)
@@ -81,6 +96,10 @@ func RunMapping() error {
 }
 
 func RunProcessor(includes, excludes map[string]bool) error {
+	if *idMaxBytes < 0 || (*idMaxBytes > 0 && *idMaxBytes < processor.MinMaxIDBytes) {
+		return fmt.Errorf("invalid -id-max-bytes %d: use 0 to disable the limit, or a value of at least %d bytes (separator + 64-char SHA-256 suffix)", *idMaxBytes, processor.MinMaxIDBytes)
+	}
+
 	var indexErr error
 
 	grouper := processor.NewGrouper(func(doc processor.Document) {
@@ -95,6 +114,7 @@ func RunProcessor(includes, excludes map[string]bool) error {
 		// Write valid JSONL
 		os.Stdout.Write(append(b, '\n'))
 	})
+	grouper.SetMaxIDBytes(*idMaxBytes)
 
 	reader := bufio.NewReader(os.Stdin)
 

@@ -125,10 +125,37 @@ func TestMapper_Generate(t *testing.T) {
 		}
 
 		if tt.field == "http://example org/html" {
-			if gotAnalyzer, hasAnalyzer := fieldMap["analyzer"].(string); hasAnalyzer {
-				t.Errorf("Field %s: rdf:HTML field should not set a custom analyzer, got %s", tt.field, gotAnalyzer)
+			if gotAnalyzer, _ := fieldMap["analyzer"].(string); gotAnalyzer != "html_strip" {
+				t.Errorf("Field %s: rdf:HTML field should use the html_strip analyzer, got %q", tt.field, gotAnalyzer)
 			}
 		}
+	}
+
+	templates, ok := result["dynamic_templates"].([]interface{})
+	if !ok || len(templates) == 0 {
+		t.Fatalf("Missing dynamic_templates in generated mapping: %v", result["dynamic_templates"])
+	}
+	foundStringsAsKeyword := false
+	for _, tpl := range templates {
+		tplMap, ok := tpl.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		for _, rule := range tplMap {
+			ruleMap, ok := rule.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if ruleMap["match_mapping_type"] == "string" {
+				mappingField, _ := ruleMap["mapping"].(map[string]interface{})
+				if mappingField["type"] == "keyword" {
+					foundStringsAsKeyword = true
+				}
+			}
+		}
+	}
+	if !foundStringsAsKeyword {
+		t.Errorf("dynamic_templates should map dynamic strings to keyword, got: %v", templates)
 	}
 
 	descriptionMap, ok := props["http://example org/description"].(map[string]interface{})
@@ -141,6 +168,108 @@ func TestMapper_Generate(t *testing.T) {
 	}
 	if analyzer != "dutch" {
 		t.Fatalf("description analyzer = %q, want %q", analyzer, "dutch")
+	}
+
+	// The mapping is sent to PUT /<index>/_mapping (e.g. via esbulk
+	// -mapping), which rejects a top-level "settings" key; analyzer
+	// definitions belong to the index-creation body (see GenerateConfig).
+	if _, ok := result["settings"]; ok {
+		t.Errorf("Generate must not emit top-level settings: %v", result["settings"])
+	}
+}
+
+func TestMapper_GenerateConfig(t *testing.T) {
+	m := mapping.NewMapper()
+	m.Add(parser.Quad{Predicate: "http://example.org/html", Object: parser.RDFHTML("<p>hi</p>")})
+	m.Add(parser.Quad{Predicate: "http://example.org/name", Object: "Alice"})
+
+	output, err := m.GenerateConfig()
+	if err != nil {
+		t.Fatalf("GenerateConfig failed: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("Invalid JSON: %v", err)
+	}
+
+	// The html field references the html_strip analyzer, so the index
+	// config must define it under settings.analysis.analyzer.
+	settings, ok := result["settings"].(map[string]interface{})
+	if !ok {
+		t.Fatal("settings key missing: html_strip analyzer must be defined")
+	}
+	analysis, ok := settings["analysis"].(map[string]interface{})
+	if !ok {
+		t.Fatal("settings.analysis missing")
+	}
+	analyzers, ok := analysis["analyzer"].(map[string]interface{})
+	if !ok {
+		t.Fatal("settings.analysis.analyzer missing")
+	}
+	htmlStrip, ok := analyzers["html_strip"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("html_strip analyzer not defined, got: %v", analyzers)
+	}
+	if htmlStrip["type"] != "custom" {
+		t.Errorf("html_strip type = %v, want custom", htmlStrip["type"])
+	}
+	charFilters, ok := htmlStrip["char_filter"].([]interface{})
+	if !ok || len(charFilters) != 1 || charFilters[0] != "html_strip" {
+		t.Errorf("html_strip char_filter = %v, want [html_strip]", htmlStrip["char_filter"])
+	}
+	if htmlStrip["tokenizer"] != "standard" {
+		t.Errorf("html_strip tokenizer = %v, want standard", htmlStrip["tokenizer"])
+	}
+
+	mappings, ok := result["mappings"].(map[string]interface{})
+	if !ok {
+		t.Fatal("mappings key missing")
+	}
+	props, ok := mappings["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("mappings.properties missing")
+	}
+	htmlField, ok := props["http://example org/html"].(map[string]interface{})
+	if !ok {
+		t.Fatal("html field missing from mappings.properties")
+	}
+	if got := htmlField["analyzer"]; got != "html_strip" {
+		t.Errorf("html field analyzer = %v, want html_strip", got)
+	}
+}
+
+func TestMapper_GenerateConfig_SettingsAlwaysPresent(t *testing.T) {
+	// Even without rdf:HTML fields, the settings must be included: analyzer
+	// definitions cannot be added to a live index, so omitting them would
+	// leave no way to add an rdf:HTML field later without recreating the
+	// index.
+	m := mapping.NewMapper()
+	m.Add(parser.Quad{Predicate: "http://example.org/name", Object: "Alice"})
+
+	output, err := m.GenerateConfig()
+	if err != nil {
+		t.Fatalf("GenerateConfig failed: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("Invalid JSON: %v", err)
+	}
+	settings, ok := result["settings"].(map[string]interface{})
+	if !ok {
+		t.Fatal("settings should be emitted even without rdf:HTML fields")
+	}
+	analysis, ok := settings["analysis"].(map[string]interface{})
+	if !ok {
+		t.Fatal("settings.analysis missing")
+	}
+	analyzers, ok := analysis["analyzer"].(map[string]interface{})
+	if !ok {
+		t.Fatal("settings.analysis.analyzer missing")
+	}
+	if _, ok := analyzers["html_strip"]; !ok {
+		t.Errorf("html_strip analyzer not defined, got: %v", analyzers)
 	}
 }
 
@@ -177,5 +306,34 @@ func TestMapper_Generate_WithForcedTextAnalyzer(t *testing.T) {
 		if analyzer, _ := fieldMap["analyzer"].(string); analyzer != "standard" {
 			t.Fatalf("Field %s analyzer = %q, want standard", field, analyzer)
 		}
+	}
+}
+
+func TestMapper_Generate_HTMLWinsOverForcedAnalyzer(t *testing.T) {
+	m := mapping.NewMapper()
+	m.SetTextAnalyzer("standard")
+
+	m.Add(parser.Quad{Predicate: "http://example.org/html", Object: parser.RDFHTML("<p>Hello</p>")})
+
+	output, err := m.Generate()
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("Invalid JSON: %v", err)
+	}
+
+	props, ok := result["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Missing properties key")
+	}
+	fieldMap, ok := props["http://example org/html"].(map[string]interface{})
+	if !ok {
+		t.Fatal("html field missing")
+	}
+	if analyzer, _ := fieldMap["analyzer"].(string); analyzer != "html_strip" {
+		t.Errorf("rdf:HTML field analyzer = %q, want html_strip even with -text-analyzer set", analyzer)
 	}
 }

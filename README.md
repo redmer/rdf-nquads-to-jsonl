@@ -23,12 +23,16 @@ $ rdf-nquads-to-jsonl -help
 Usage of rdf-nquads-to-jsonl:
   -exclude string
         Comma-separated list of graph URIs to exclude (blocklist)
+  -generate-config
+        Generate Elasticsearch index-creation body (settings + mappings) from input, for use with esbulk -c
   -generate-mapping
         Generate Elasticsearch mapping from input
+  -id-max-bytes int
+        Maximum byte length of emitted document _id values; longer Subject URIs are truncated with a SHA-256 suffix. 0 disables the limit; values below 65 are rejected (default 512)
   -include string
         Comma-separated list of graph URIs to include (allowlist)
   -text-analyzer string
-    Elasticsearch analyzer to apply to inferred text fields (overrides language-based inference)
+        Elasticsearch analyzer to apply to inferred text fields (overrides language-based inference)
 ```
 
 Demonstrating output: downloading a Gzipped NQuads file, unzipping, sorting and sending colorizing output to less:
@@ -68,8 +72,11 @@ A more typical example, sending to a ElasticSearch server with an API key:
 
 ```sh
 zcat data.nq.gz | LC_ALL=C sort | rdf-nquads-to-jsonl -generate-mapping > mapping.json
-zcat data.nq.gz | LC_ALL=C sort | rdf-nquads-to-jsonl | esbulk -server http://localhost:9200 -index my-index2 -apikey '...' -id _id -mapping mapping.json
+zcat data.nq.gz | LC_ALL=C sort | rdf-nquads-to-jsonl -generate-config > config.json
+zcat data.nq.gz | LC_ALL=C sort | rdf-nquads-to-jsonl | esbulk -server http://localhost:9200 -index my-index2 -apikey '...' -id _id -c config.json -mapping mapping.json
 ```
+
+`-generate-mapping` emits a mapping-only body, which `esbulk -mapping` sends to `PUT /<index>/_mapping`; that endpoint rejects top-level `settings`. The analyzer definitions (e.g. `html_strip` for `rdf:HTML` fields) therefore live in the `-generate-config` output, applied at index-creation time via `esbulk -c`. This fits zero-downtime reindexing: create the new index with `-c`, bulk-load, then reassign the alias. `esbulk -c` is a no-op when the index already exists, so the settings never overwrite a live index.
 
 ## Document Format
 
@@ -83,14 +90,14 @@ Each Subject becomes one Elasticsearch document:
 }
 ```
 
-- The `_id` is the Subject URI.
+- The `_id` is the Subject URI. Elasticsearch rejects `_id` values longer than 512 bytes, so longer Subject URIs are truncated to fit: the first `max-65` bytes are kept (cut at a UTF-8 rune boundary), followed by a `^` separator and the 64-character hex SHA-256 of the full URI. `^` cannot occur in an IRI (RFC 3987), so a truncated `_id` can never collide with an unmodified Subject. Use `-id-max-bytes` to change the limit; `0` disables it. Values between 1 and 64 are rejected at startup, because they would truncate the SHA-256 suffix itself and make distinct long subjects collide.
 - Predicate URIs are used as field keys with `.` replaced by ` ` (space) -- periods are special in ElasticSearch fields.
 - All values are arrays of strings.
 - Language-tagged strings become plain strings.
 - Numbers and boolean datatype become JSON numbers and booleans.
 - `xsd:date`, `xsd:dateTime` literals are treated as dates for mapping generation.
 - `xsd:anyURI` literals are treated as keyword values for mapping generation.
-- `rdf:HTML` literals map to `text` with `html_strip` analyzer.
+- `rdf:HTML` literals map to `text` with the `html_strip` analyzer; `-generate-config` defines that custom analyzer under `settings.analysis.analyzer.html_strip` (HTML char filter + standard tokenizer), so it is in place when the index is created.
 - `geosparql:wktLiteral` and `geosparql:geoJSONLiteral` map to `geo_shape`.
 - Markdown literals map to `text`. Recognized datatypes:
   - `http://ns.ontowiki.net/SysOnt/Markdown`
@@ -98,7 +105,8 @@ Each Subject becomes one Elasticsearch document:
   - If there're more Markdown datatypes, please open an issue.
 - Language-tagged literals (e.g. `"label"@en`) are treated as text values for mapping generation.
 - For language-tagged text fields, mapping generation picks the best matching Elasticsearch analyzer from observed language tags (for example `@nl` -> `dutch`).
-- Use `-text-analyzer` to force a specific analyzer for all inferred `text` fields. Set it to the empty string to turn off all text analyzer inference.
+- Use `-text-analyzer` to force a specific analyzer for all inferred `text` fields (except `rdf:HTML`, which always uses `html_strip`). Set it to the empty string to turn off all text analyzer inference.
+- The generated mapping includes a `dynamic_templates` rule that maps any dynamically added string fields to `keyword`, so ad-hoc string fields stay exactly searchable instead of being analyzed `text`.
 - Plain string literals are inferred per field: long or mixed-content fields map to `text`, while consistently short values (with enough samples) can map to `keyword`.
 - All other strings with a datatype become plain strings.
 
