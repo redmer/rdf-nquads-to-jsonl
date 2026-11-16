@@ -215,6 +215,20 @@ func TestParseQuad(t *testing.T) {
 			wantObj:  "-INF",
 		},
 		{
+			name:     "xsd:double +INF stays a string",
+			line:     `<http://example.org/s> <http://example.org/p> "+INF"^^<http://www.w3.org/2001/XMLSchema#double> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  "+INF",
+		},
+		{
+			name:     "xsd:double overflowing float64 stays a string",
+			line:     `<http://example.org/s> <http://example.org/p> "1e999"^^<http://www.w3.org/2001/XMLSchema#double> .`,
+			wantSubj: "http://example.org/s",
+			wantPred: "http://example.org/p",
+			wantObj:  "1e999",
+		},
+		{
 			name:     "integer overflowing int64 falls back to float",
 			line:     `<http://example.org/s> <http://example.org/p> "9223372036854775808"^^<http://www.w3.org/2001/XMLSchema#integer> .`,
 			wantSubj: "http://example.org/s",

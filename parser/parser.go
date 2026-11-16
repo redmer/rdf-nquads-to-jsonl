@@ -256,6 +256,16 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 				case "http://www.w3.org/2001/XMLSchema#decimal", "http://www.w3.org/2001/XMLSchema#double", "http://www.w3.org/2001/XMLSchema#float":
 					f, err := strconv.ParseFloat(rawVal, 64)
 					if err != nil {
+						// JSON cannot represent Infinity. Accept the XSD spellings
+						// INF/-INF and values that overflow float64 (which
+						// strconv.ParseFloat reports as ±Inf with ErrRange), but
+						// keep the lexical form as a string in both cases.
+						if rawVal == "INF" || rawVal == "+INF" || rawVal == "-INF" {
+							return rawVal, rest, nil
+						}
+						if errors.Is(err, strconv.ErrRange) && math.IsInf(f, 0) {
+							return rawVal, rest, nil
+						}
 						return nil, "", fmt.Errorf("invalid decimal: %q", rawVal)
 					}
 					// JSON cannot represent NaN or Infinity; keep the lexical form as a string.
