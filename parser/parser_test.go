@@ -286,6 +286,11 @@ func TestGeoJSONMarshalJSON(t *testing.T) {
 			wantObj: map[string]interface{}{"type": "Point", "coordinates": []interface{}{30.0, 10.0}},
 		},
 		{
+			name:    "precision loss int GeoJSON object",
+			input:   parser.GeoJSON(`{"type":"Point","coordinates":[9007199254740993,10]}`),
+			wantObj: map[string]interface{}{"type": "Point", "coordinates": []interface{}{9007199254740993.0, 10.0}},
+		},
+		{
 			name:    "WKT-like value stays a string",
 			input:   parser.GeoJSON("POINT (30 10)"),
 			wantStr: "POINT (30 10)",

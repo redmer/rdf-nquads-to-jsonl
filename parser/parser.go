@@ -48,7 +48,7 @@ func (g GeoJSON) MarshalJSON() ([]byte, error) {
 	// A lexical "null" unmarshals successfully into a nil map; treat that as
 	// not-a-JSON-object so it falls back to a plain string.
 	if err := json.Unmarshal([]byte(g), &v); err == nil && v != nil {
-		return json.Marshal(v)
+		return json.RawMessage(g), nil
 	}
 	return json.Marshal(string(g))
 }
