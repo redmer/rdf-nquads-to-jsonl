@@ -478,8 +478,8 @@ func TestMapper_GenerateDatatypeAndOptionMappings(t *testing.T) {
 		t.Errorf("description analyzer = %v, want standard", description["analyzer"])
 	}
 	fullText := assertMapping("full_text", "text")
-	if fullText["analyzer"] != "copy_to_html_strip" {
-		t.Errorf("full_text analyzer = %v, want copy_to_html_strip", fullText["analyzer"])
+	if fullText["analyzer"] != "catch_all_filter" {
+		t.Errorf("full_text analyzer = %v, want catch_all_filter", fullText["analyzer"])
 	}
 	if _, ok := fullText["copy_to"]; ok {
 		t.Errorf("copy-to target must not copy to itself: %v", fullText)
@@ -572,8 +572,8 @@ func TestMapper_CopyToTargetStripsMarkup(t *testing.T) {
 	if fullText["type"] != "text" {
 		t.Fatalf("full_text type = %v, want text", fullText["type"])
 	}
-	if fullText["analyzer"] != "copy_to_html_strip" {
-		t.Errorf("full_text analyzer = %v, want copy_to_html_strip", fullText["analyzer"])
+	if fullText["analyzer"] != "catch_all_filter" {
+		t.Errorf("full_text analyzer = %v, want catch_all_filter", fullText["analyzer"])
 	}
 	if _, ok := fullText["copy_to"]; ok {
 		t.Errorf("copy-to target must not copy to itself: %v", fullText)
@@ -590,16 +590,16 @@ func TestMapper_CopyToTargetStripsMarkup(t *testing.T) {
 		t.Fatalf("Invalid config JSON: %v", err)
 	}
 	analyzers := configDoc["settings"].(map[string]interface{})["analysis"].(map[string]interface{})["analyzer"].(map[string]interface{})
-	catchAll, ok := analyzers["copy_to_html_strip"].(map[string]interface{})
+	catchAll, ok := analyzers["catch_all_filter"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("copy_to_html_strip analyzer not defined, got: %v", analyzers)
+		t.Fatalf("catch_all_filter analyzer not defined, got: %v", analyzers)
 	}
 	if catchAll["type"] != "custom" || catchAll["tokenizer"] != "standard" {
-		t.Errorf("copy_to_html_strip = %v, want custom analyzer with standard tokenizer", catchAll)
+		t.Errorf("catch_all_filter = %v, want custom analyzer with standard tokenizer", catchAll)
 	}
 	charFilters, ok := catchAll["char_filter"].([]interface{})
 	if !ok || len(charFilters) != 1 || charFilters[0] != "html_strip" {
-		t.Errorf("copy_to_html_strip char_filter = %v, want [html_strip]", catchAll["char_filter"])
+		t.Errorf("catch_all_filter char_filter = %v, want [html_strip]", catchAll["char_filter"])
 	}
 }
 

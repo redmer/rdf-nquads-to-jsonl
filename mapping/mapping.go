@@ -308,11 +308,9 @@ var Settings = map[string]interface{}{
 				"char_filter": []interface{}{"html_strip"},
 				"tokenizer":   "standard",
 			},
-			// copy_to_html_strip is the catch-all variant: rdf:HTML values
-			// copied into a copy_to target arrive as raw markup, so the
-			// catch-all must strip it too, otherwise searches match tag
-			// names and attribute names present only in the markup.
-			"copy_to_html_strip": map[string]interface{}{
+			// catch_all_filter strips casing and HTML, as rdf:HTLM content
+			// might else match tags and attributes
+			"catch_all_filter": map[string]interface{}{
 				"type":        "custom",
 				"char_filter": []interface{}{"html_strip"},
 				"tokenizer":   "standard",
@@ -396,7 +394,7 @@ func (m *Mapper) Generate() ([]byte, error) {
 		// so it needs the markup-stripping analyzer: otherwise searches
 		// there can match tag names and attribute names that the source
 		// field strips.
-		targetMapping["analyzer"] = "copy_to_html_strip"
+		targetMapping["analyzer"] = "catch_all_filter"
 		properties[m.options.CopyTo] = targetMapping
 	}
 
