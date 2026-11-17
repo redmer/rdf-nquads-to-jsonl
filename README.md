@@ -118,7 +118,7 @@ Each Subject becomes one Elasticsearch document:
 - Language-tagged strings become plain strings.
 - Numbers and boolean datatype become JSON numbers and booleans.
 - The XSD integer family (`integer`, `int`, `long`, `short`, `byte`, and the signed/unsigned constrained integer types) becomes JSON integers when in `int64` range, then falls back to floating point or its lexical string for larger values.
-- `xsd:decimal` values become JSON numbers and map to `scaled_float` with `-decimal-scaling-factor` (default `10000`). A field that also contains `xsd:float` or `xsd:double` maps to `double`.
+- `xsd:decimal` values become JSON numbers and map to `scaled_float` with `-decimal-scaling-factor` (default `10000`). A field that also contains `xsd:float` or `xsd:double` maps to `double`. Because `scaled_float` stores `value * scaling_factor` in a signed 64-bit integer, a decimal-only field whose largest observed value would overflow that range (e.g. `1e15` at factor `10000`) falls back to `double`.
 - `xsd:date`, `xsd:dateTime`, and `xsd:time` literals are treated as dates for mapping generation. Generated date formats accept strict date/time values and `epoch_millis`.
 - `xsd:language`, `xsd:duration`, `xsd:base64Binary`, `xsd:hexBinary`, `xsd:QName`, and `xsd:NMTOKEN` map to `keyword`.
 - `rdf:JSON` literals are always emitted as plain strings holding the lexical form, and map to `text` like other string literals. A predicate may mix `rdf:JSON` objects with scalar values, and Elasticsearch cannot map one field as both `object` and a scalar type, so a consistent string representation is used.

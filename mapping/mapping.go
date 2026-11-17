@@ -3,6 +3,7 @@ package mapping
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/redmer/rdf-nquads-to-jsonl/parser"
@@ -56,6 +57,9 @@ func DefaultOptions() Options {
 type fieldProfile struct {
 	baseType FieldType
 
+	// maxAbsDecimal is the largest absolute xsd:decimal value seen, used to
+	// detect when scaled_float would overflow its int64 backing storage.
+	maxAbsDecimal   float64
 	stringCount     int
 	stringTotalLen  int
 	stringMaxLen    int
@@ -114,6 +118,11 @@ func (m *Mapper) Add(q parser.Quad) {
 
 	if newType != TypeUnknown {
 		profile.baseType = resolveType(profile.baseType, newType)
+	}
+	if d, ok := q.Object.(parser.XSDDecimal); ok {
+		if a := math.Abs(float64(d)); a > profile.maxAbsDecimal {
+			profile.maxAbsDecimal = a
+		}
 	}
 }
 
@@ -348,9 +357,15 @@ func (m *Mapper) Generate() ([]byte, error) {
 		case TypeLong:
 			mapping = map[string]interface{}{"type": "long"}
 		case TypeDecimal:
-			mapping = map[string]interface{}{
-				"type":           "scaled_float",
-				"scaling_factor": m.options.DecimalScalingFactor,
+			// scaled_float stores value * scaling_factor in an int64; larger
+			// values silently saturate and collide, so fall back to double.
+			if profile.maxAbsDecimal*math.Abs(m.options.DecimalScalingFactor) > math.MaxInt64 {
+				mapping = map[string]interface{}{"type": "double"}
+			} else {
+				mapping = map[string]interface{}{
+					"type":           "scaled_float",
+					"scaling_factor": m.options.DecimalScalingFactor,
+				}
 			}
 		case TypeDouble:
 			mapping = map[string]interface{}{"type": "double"}

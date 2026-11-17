@@ -503,6 +503,70 @@ func TestMapper_GenerateDatatypeAndOptionMappings(t *testing.T) {
 	}
 }
 
+func TestMapper_DecimalOverflowFallsBackToDouble(t *testing.T) {
+	addDecimal := func(m *mapping.Mapper, field, value string) {
+		t.Helper()
+		quad, err := parser.ParseQuad(`<s> <` + field + `> "` + value + `"^^<http://www.w3.org/2001/XMLSchema#decimal> .`)
+		if err != nil {
+			t.Fatalf("ParseQuad(%q): %v", value, err)
+		}
+		m.Add(quad)
+	}
+	generate := func(t *testing.T, m *mapping.Mapper) map[string]interface{} {
+		t.Helper()
+		output, err := m.Generate()
+		if err != nil {
+			t.Fatalf("Generate failed: %v", err)
+		}
+		var result map[string]interface{}
+		if err := json.Unmarshal(output, &result); err != nil {
+			t.Fatalf("Invalid JSON: %v", err)
+		}
+		return result["properties"].(map[string]interface{})
+	}
+
+	// Default factor 10000: 1e15 and 2e15 both exceed int64 once scaled, and
+	// scaled_float would index them to the same saturating value.
+	m := mapping.NewMapper()
+	addDecimal(m, "http://example.org/big", "1000000000000000")
+	addDecimal(m, "http://example.org/big", "2000000000000000")
+	addDecimal(m, "http://example.org/small", "1.25")
+	props := generate(t, m)
+	if props["http://example org/big"].(map[string]interface{})["type"] != "double" {
+		t.Errorf("overflowing decimal field = %v, want double", props["http://example org/big"])
+	}
+	big := props["http://example org/big"].(map[string]interface{})
+	if _, ok := big["scaling_factor"]; ok {
+		t.Errorf("double fallback must not carry scaling_factor: %v", big)
+	}
+	small := props["http://example org/small"].(map[string]interface{})
+	if small["type"] != "scaled_float" || small["scaling_factor"] != float64(10000) {
+		t.Errorf("in-range decimal field = %v, want scaled_float with factor 10000", small)
+	}
+
+	// A negative value with large magnitude overflows the same way.
+	m = mapping.NewMapper()
+	addDecimal(m, "http://example.org/neg", "-9999999999999999.5")
+	if props := generate(t, m); props["http://example org/neg"].(map[string]interface{})["type"] != "double" {
+		t.Errorf("large negative decimal = %v, want double", props["http://example org/neg"])
+	}
+
+	// The largest scaled value that still fits int64 stays scaled_float.
+	m = mapping.NewMapper()
+	addDecimal(m, "http://example.org/edge", "922337203685477.5807")
+	if props := generate(t, m); props["http://example org/edge"].(map[string]interface{})["type"] != "scaled_float" {
+		t.Errorf("max int64-scaled decimal = %v, want scaled_float", props["http://example org/edge"])
+	}
+
+	// A mixed decimal/double field already maps to double regardless.
+	m = mapping.NewMapper()
+	addDecimal(m, "http://example.org/mixed", "1.25")
+	m.Add(parser.Quad{Predicate: "http://example.org/mixed", Object: 2.5})
+	if props := generate(t, m); props["http://example org/mixed"].(map[string]interface{})["type"] != "double" {
+		t.Errorf("mixed field = %v, want double", props["http://example org/mixed"])
+	}
+}
+
 func TestMapper_GenerateOptionDisables(t *testing.T) {
 	options := mapping.DefaultOptions()
 	options.TextKeywordSubfield = false
