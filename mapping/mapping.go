@@ -316,6 +316,7 @@ var Settings = map[string]interface{}{
 				"type":        "custom",
 				"char_filter": []interface{}{"html_strip"},
 				"tokenizer":   "standard",
+				"filter":      []interface{}{"lowercase"},
 			},
 		},
 	},
