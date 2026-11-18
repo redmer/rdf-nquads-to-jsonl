@@ -49,7 +49,7 @@ func DefaultOptions() Options {
 	return Options{
 		DecimalScalingFactor: 10000,
 		TextKeywordSubfield:  true,
-		KeywordIgnoreAbove:   256,
+		KeywordIgnoreAbove:   8191, // 8191*4 UTF-8 bytes < Lucene keyword maximum
 		IgnoreMalformedGeo:   true,
 	}
 }

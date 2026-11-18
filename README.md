@@ -6,7 +6,9 @@ Transforms a pre-sorted N-Quads stream into JSONL documents, ready to be loaded 
 
 - a pre-sorted N-Quads stream from stdin (e.g., `zcat data.nq.gz | LC_ALL=C sort`)
 - a bulk loader for ElasticSearch (e.g., [`esbulk`])
-- the N-Quads stream must not contain blank nodes. Use skolemization beforehand.
+
+> [!CAUTION]
+> The N-Quads source must not contain blank nodes. Use skolemization beforehand.
 
 [esbulk]: https://github.com/miku/esbulk
 
@@ -17,6 +19,16 @@ Ensure Go is installed, then compile from source: `go install github.com/redmer/
 ## Usage
 
 Use `rdf-nquads-to-jsonl` in a pipeline with connected stdin and stdout.
+
+Generally, use the options `-generate-config` and `-generate-mapping` to generate index settings and a mapping.
+The config and the mapping are based on the shape of the quad stream.
+Then, stream in the quads and connect stdout for all ES documents as JSONL.
+
+This tool can be used for zero-downtime reindexing: create the new index with `esbulk -c`, bulk-load, then reassign the alias.
+`esbulk -c` is a no-op when the index already exists, so the settings never overwrite a live index.
+
+<details>
+<summary><code>$ rdf-nquads-to-jsonl -help</code></summary>
 
 ```
 $ rdf-nquads-to-jsonl -help
@@ -40,7 +52,7 @@ Usage of rdf-nquads-to-jsonl:
   -include string
         Comma-separated list of graph URIs to include (allowlist)
   -keyword-ignore-above int
-        Maximum keyword value length before Elasticsearch skips indexing; 0 omits ignore_above (default 256)
+        Maximum keyword value length before Elasticsearch skips indexing; 0 omits ignore_above (default 8191)
   -keyword-lowercase-normalizer
         Apply a lowercase normalizer to keyword fields and text keyword sub-fields
   -text-analyzer string
@@ -49,10 +61,12 @@ Usage of rdf-nquads-to-jsonl:
         Add a keyword sub-field to inferred text fields (default true)
 ```
 
-Demonstrating output: downloading a Gzipped NQuads file, unzipping, sorting and sending colorizing output to less:
+</details>
+
+The below example shows a download of a Gzipped NQuads file, unzipping, sorting, processing and sending colorizing output to less:
 
 ```bash
-curl -sL https://datasets.crow.nl/crow/thesaurus/download.nq.gz | zcat | LC_ALL=C sort | rdf-nquads-to-jsonl | jq -c '.' | less
+curl -sL https://datasets.crow.nl/crow/thesaurus/download.nq.gz | zcat | LC_ALL=C sort | rdf-nquads-to-jsonl | jq -Cs '.' | less
 ```
 
 <details><summary>Output: example line</summary>
@@ -90,38 +104,30 @@ zcat data.nq.gz | LC_ALL=C sort | rdf-nquads-to-jsonl -generate-config > config.
 zcat data.nq.gz | LC_ALL=C sort | rdf-nquads-to-jsonl | esbulk -server http://localhost:9200 -index my-index2 -apikey '...' -id _id -c config.json -mapping mapping.json
 ```
 
-Mapping options can be combined with either generation command, for example:
-
-```sh
-zcat data.nq.gz | LC_ALL=C sort | rdf-nquads-to-jsonl \
-  -generate-config -decimal-scaling-factor 10000 -copy-to full_text \
-  -keyword-lowercase-normalizer > config.json
-```
-
-`-generate-mapping` emits a mapping-only body, which `esbulk -mapping` sends to `PUT /<index>/_mapping`; that endpoint rejects top-level `settings`. The analyzer definitions (e.g. `html_strip` for `rdf:HTML` fields) therefore live in the `-generate-config` output, applied at index-creation time via `esbulk -c`. This fits zero-downtime reindexing: create the new index with `-c`, bulk-load, then reassign the alias. `esbulk -c` is a no-op when the index already exists, so the settings never overwrite a live index.
-
 ## Document Format
 
-Each Subject becomes one Elasticsearch document:
+Each RDF subject becomes one Elasticsearch document, with RDF predicates and RDF objects from all graphs combined together.
+Some predicates and datatypes are processed for native processing by Elasticsearch, so that e.g. `xsd:date`s become range-filterable.
+It is certainly a lossy mapping, but probably useful for full text search, filtering and aggregation.
 
-```json
-{
-  "_id": "https://example.com/person/123",
-  "http://schema org/name": ["John Doe"],
-  "http://schema org/knows": ["https://example.com/person/456"]
-}
-```
+- `_id` is the RDF subject URI and the Elasticsearch document ID.
 
-- The `_id` is the Subject URI. Elasticsearch rejects `_id` values longer than 512 bytes, so longer Subject URIs are truncated to fit: the first `max-65` bytes are kept (cut at a UTF-8 rune boundary), followed by a `^` separator and the 64-character hex SHA-256 of the full URI. `^` cannot occur in an IRI (RFC 3987), so a truncated `_id` can never collide with an unmodified Subject. Use `-id-max-bytes` to change the limit; `0` disables it. Values between 1 and 64 are rejected at startup, because they would truncate the SHA-256 suffix itself and make distinct long subjects collide.
-- Predicate URIs are used as field keys with `.` replaced by ` ` (space) -- periods are special in ElasticSearch fields.
-- All predicate values are arrays of JSON values (strings, numbers, or booleans).
+  > [!IMPORTANT]  
+  > Elasticsearch rejects jobs with any `_id` value longer than 512 bytes. Longer RDF subject URIs are truncated to fit, but still kept unique with a full-URI hash suffix.
+  >
+  > Use `-id-max-bytes` to change the limit; disable with `0`.
+  > stderr outputs remapped URIs.
+
+- `_graph` contains the URIs of all graphs the subject was found in.
+- RDF predicate URIs are used as field keys. Periods are special in ES fields, so `.` in a predicate is replaced by ` ` (space).
+- All values are arrays of JSON values (strings, numbers, or booleans).
 - Language-tagged strings become plain strings.
-- Numbers and boolean datatype become JSON numbers and booleans.
+  - For language-tagged text fields, mapping generation picks the best matching Elasticsearch analyzer from observed language tags (for example `@nl` -> `dutch`).
+  - Use `-text-analyzer` to force a specific analyzer for all inferred `text` fields (except `rdf:HTML`, which always uses `html_strip`). Set it to the empty string to turn off all text analyzer inference.
 - The XSD integer family (`integer`, `int`, `long`, `short`, `byte`, and the signed/unsigned constrained integer types) becomes JSON integers when in `int64` range, then falls back to floating point or its lexical string for larger values.
-- `xsd:decimal` values become JSON numbers and map to `scaled_float` with `-decimal-scaling-factor` (default `10000`). A field that also contains `xsd:float` or `xsd:double` maps to `double`. Because `scaled_float` stores `value * scaling_factor` in a signed 64-bit integer, a decimal-only field whose largest observed value would overflow that range (e.g. `1e15` at factor `10000`) falls back to `double`.
+  - `xsd:decimal` values become JSON numbers and map to `scaled_float` with `-decimal-scaling-factor` (default `10000`). A field that also contains `xsd:float` or `xsd:double`, or that would overflow, maps to `double`.
 - `xsd:date`, `xsd:dateTime`, and `xsd:time` literals are treated as dates for mapping generation. Generated date formats accept strict date/time values and `epoch_millis`.
 - `xsd:language`, `xsd:duration`, `xsd:base64Binary`, `xsd:hexBinary`, `xsd:QName`, and `xsd:NMTOKEN` map to `keyword`.
-- `rdf:JSON` literals are always emitted as plain strings holding the lexical form, and map to `text` like other string literals. A predicate may mix `rdf:JSON` objects with scalar values, and Elasticsearch cannot map one field as both `object` and a scalar type, so a consistent string representation is used.
 - `xsd:anyURI` literals are treated as keyword values for mapping generation.
 - `rdf:HTML` literals map to `text` with the `html_strip` analyzer; `-generate-config` defines that custom analyzer under `settings.analysis.analyzer.html_strip` (HTML char filter + standard tokenizer), so it is in place when the index is created.
 - `geosparql:wktLiteral` and `geosparql:geoJSONLiteral` map to `geo_shape`.
@@ -130,13 +136,11 @@ Each Subject becomes one Elasticsearch document:
   - `<https://triplydb.com/Triply/vocab/def/markdown>`
   - If there're more Markdown datatypes, please open an issue.
 - Language-tagged literals (e.g. `"label"@en`) are treated as text values for mapping generation.
-- For language-tagged text fields, mapping generation picks the best matching Elasticsearch analyzer from observed language tags (for example `@nl` -> `dutch`).
-- Use `-text-analyzer` to force a specific analyzer for all inferred `text` fields (except `rdf:HTML`, which always uses `html_strip`). Set it to the empty string to turn off all text analyzer inference.
 - The generated mapping includes a `dynamic_templates` rule that maps any dynamically added string fields to `keyword`, so ad-hoc string fields stay exactly searchable instead of being analyzed `text`.
 - Plain string literals are inferred per field: long or mixed-content fields map to `text`, while consistently short values (with enough samples) can map to `keyword`. This heuristic avoids keyword-indexing prose while keeping short identifiers aggregatable.
-- Inferred `text` fields have a `keyword` multi-field by default (`-text-keyword-subfield=false` disables it); all keyword fields use `ignore_above: 256` by default (`-keyword-ignore-above=0` omits it). `-keyword-lowercase-normalizer` applies a lowercase normalizer, defined in `-generate-config` settings.
+- Inferred `text` fields have a `keyword` multi-field by default (disables with `-text-keyword-subfield=false`); all keyword fields use `ignore_above: 8191` by default (disable with `-keyword-ignore-above=0`). `-keyword-lowercase-normalizer` applies a lowercase normalizer, defined in `-generate-config` settings.
 - `-copy-to full_text` adds `copy_to` to inferred text fields and declares a catch-all `full_text` text property.
-- Generated mappings disable Elasticsearch date and numeric detection. Geo-shape fields ignore malformed values by default (`-ignore-malformed-geo=false` disables this). `-date-subfield` opts into a text field with an `ignore_malformed` date multi-field; strict date mappings remain the default.
+- Generated mappings disable Elasticsearch date and numeric detection. Geo-shape fields ignore malformed values by default (disable with `-ignore-malformed-geo=false`). `-date-subfield` opts into a text field with an `ignore_malformed` date multi-field; strict date mappings remain the default.
 - All other strings with a datatype become plain strings.
 
 ## Development

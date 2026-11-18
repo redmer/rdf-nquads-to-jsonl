@@ -125,7 +125,7 @@ func TestMapper_Generate(t *testing.T) {
 				t.Errorf("Field %s: expected a keyword subfield by default", tt.field)
 			} else {
 				keyword, ok := fields["keyword"].(map[string]interface{})
-				if !ok || keyword["type"] != "keyword" || keyword["ignore_above"] != float64(256) {
+				if !ok || keyword["type"] != "keyword" || keyword["ignore_above"] != float64(8191) {
 					t.Errorf("Field %s: unexpected keyword subfield: %v", tt.field, fields["keyword"])
 				}
 			}
@@ -136,8 +136,8 @@ func TestMapper_Generate(t *testing.T) {
 				t.Errorf("Field %s: rdf:HTML field should use the html_strip analyzer, got %q", tt.field, gotAnalyzer)
 			}
 		}
-		if tt.field == "http://example org/ref" && fieldMap["ignore_above"] != float64(256) {
-			t.Errorf("URI keyword ignore_above = %v, want 256", fieldMap["ignore_above"])
+		if tt.field == "http://example org/ref" && fieldMap["ignore_above"] != float64(8191) {
+			t.Errorf("URI keyword ignore_above = %v, want 8191", fieldMap["ignore_above"])
 		}
 		if tt.field == "http://example org/date_mixed" {
 			format, _ := fieldMap["format"].(string)
@@ -456,7 +456,7 @@ func TestMapper_GenerateDatatypeAndOptionMappings(t *testing.T) {
 	}
 
 	language := assertMapping("http://example org/language", "keyword")
-	if language["ignore_above"] != float64(256) || language["normalizer"] != "lowercase_normalizer" {
+	if language["ignore_above"] != float64(8191) || language["normalizer"] != "lowercase_normalizer" {
 		t.Errorf("language keyword mapping = %v", language)
 	}
 	assertMapping("http://example org/keyword", "keyword")
