@@ -335,36 +335,53 @@ func TestGeoJSONMarshalJSON(t *testing.T) {
 }
 
 func TestXSDIntegerFamily(t *testing.T) {
-	datatypes := []string{
-		"integer", "int", "long", "short", "byte", "nonNegativeInteger",
-		"nonPositiveInteger", "positiveInteger", "negativeInteger", "unsignedLong",
-		"unsignedInt", "unsignedShort", "unsignedByte",
+	tests := []struct {
+		datatype string
+		valid    []string
+		invalid  []string
+	}{
+		{datatype: "integer", valid: []string{"123", "9223372036854775808", strings.Repeat("9", 400)}},
+		{datatype: "int", valid: []string{"-2147483648", "2147483647"}, invalid: []string{"-2147483649", "2147483648"}},
+		{datatype: "long", valid: []string{"-9223372036854775808", "9223372036854775807"}, invalid: []string{"-9223372036854775809", "9223372036854775808"}},
+		{datatype: "short", valid: []string{"-32768", "32767"}, invalid: []string{"-32769", "32768"}},
+		{datatype: "byte", valid: []string{"-128", "127"}, invalid: []string{"-129", "128"}},
+		{datatype: "nonNegativeInteger", valid: []string{"0", "9223372036854775808"}, invalid: []string{"-1"}},
+		{datatype: "nonPositiveInteger", valid: []string{"-9223372036854775809", "0"}, invalid: []string{"1"}},
+		{datatype: "positiveInteger", valid: []string{"1", "9223372036854775808"}, invalid: []string{"-1", "0"}},
+		{datatype: "negativeInteger", valid: []string{"-9223372036854775809", "-1"}, invalid: []string{"0", "1"}},
+		{datatype: "unsignedLong", valid: []string{"0", "18446744073709551615"}, invalid: []string{"-1", "18446744073709551616"}},
+		{datatype: "unsignedInt", valid: []string{"0", "4294967295"}, invalid: []string{"-1", "4294967296"}},
+		{datatype: "unsignedShort", valid: []string{"0", "65535"}, invalid: []string{"-1", "65536"}},
+		{datatype: "unsignedByte", valid: []string{"0", "255"}, invalid: []string{"-1", "256"}},
 	}
-	for _, datatype := range datatypes {
-		t.Run(datatype, func(t *testing.T) {
-			quad, err := parser.ParseQuad(`<s> <p> "123"^^<http://www.w3.org/2001/XMLSchema#` + datatype + `> .`)
-			if err != nil {
-				t.Fatalf("ParseQuad failed: %v", err)
+	integerFallback := map[string]bool{
+		"integer": true, "nonNegativeInteger": true, "nonPositiveInteger": true,
+		"positiveInteger": true, "negativeInteger": true, "unsignedLong": true,
+	}
+	for _, tt := range tests {
+		t.Run(tt.datatype, func(t *testing.T) {
+			for _, value := range tt.valid {
+				quad, err := parser.ParseQuad(`<s> <p> "` + value + `"^^<http://www.w3.org/2001/XMLSchema#` + tt.datatype + `> .`)
+				if err != nil {
+					t.Errorf("ParseQuad(%q) failed: %v", value, err)
+					continue
+				}
+				if len(value) < 400 && (!integerFallback[tt.datatype] || len(value) < 19) {
+					if _, ok := quad.Object.(int64); !ok {
+						t.Errorf("ParseQuad(%q) object = %#v (%T), want int64", value, quad.Object, quad.Object)
+					}
+				} else if len(value) < 400 {
+					if _, ok := quad.Object.(float64); !ok {
+						t.Errorf("ParseQuad(%q) object = %#v (%T), want float64 fallback", value, quad.Object, quad.Object)
+					}
+				} else if got, ok := quad.Object.(string); !ok || got != value {
+					t.Errorf("ParseQuad(%q) object = %#v (%T), want lexical string fallback", value, quad.Object, quad.Object)
+				}
 			}
-			if got, ok := quad.Object.(int64); !ok || got != 123 {
-				t.Fatalf("object = %#v (%T), want int64(123)", quad.Object, quad.Object)
-			}
-
-			quad, err = parser.ParseQuad(`<s> <p> "9223372036854775808"^^<http://www.w3.org/2001/XMLSchema#` + datatype + `> .`)
-			if err != nil {
-				t.Fatalf("ParseQuad overflow failed: %v", err)
-			}
-			if got, ok := quad.Object.(float64); !ok || got != float64(9223372036854775808) {
-				t.Fatalf("overflow object = %#v (%T), want float64 fallback", quad.Object, quad.Object)
-			}
-
-			huge := strings.Repeat("9", 400)
-			quad, err = parser.ParseQuad(`<s> <p> "` + huge + `"^^<http://www.w3.org/2001/XMLSchema#` + datatype + `> .`)
-			if err != nil {
-				t.Fatalf("ParseQuad large overflow failed: %v", err)
-			}
-			if got, ok := quad.Object.(string); !ok || got != huge {
-				t.Fatalf("large overflow object = %#v (%T), want lexical string fallback", quad.Object, quad.Object)
+			for _, value := range tt.invalid {
+				if _, err := parser.ParseQuad(`<s> <p> "` + value + `"^^<http://www.w3.org/2001/XMLSchema#` + tt.datatype + `> .`); err == nil {
+					t.Errorf("ParseQuad(%q) accepted a value outside %s", value, tt.datatype)
+				}
 			}
 		})
 	}

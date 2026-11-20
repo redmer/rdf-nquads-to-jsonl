@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -272,16 +273,9 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 					"http://www.w3.org/2001/XMLSchema#unsignedInt",
 					"http://www.w3.org/2001/XMLSchema#unsignedShort",
 					"http://www.w3.org/2001/XMLSchema#unsignedByte":
-					n, err := strconv.ParseInt(rawVal, 10, 64)
+					n, err := parseXSDInteger(rawVal, strings.TrimPrefix(datatype, "http://www.w3.org/2001/XMLSchema#"))
 					if err != nil {
-						if errors.Is(err, strconv.ErrRange) {
-							// Out of int64 range: fall back to float64, then to the lexical string.
-							if f, ferr := strconv.ParseFloat(rawVal, 64); ferr == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
-								return f, rest, nil
-							}
-							return rawVal, rest, nil
-						}
-						return nil, "", fmt.Errorf("invalid integer: %q", rawVal)
+						return nil, "", err
 					}
 					return n, rest, nil
 				case "http://www.w3.org/2001/XMLSchema#decimal":
@@ -372,6 +366,44 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 		i++
 	}
 	return nil, "", fmt.Errorf("unterminated literal: %q", s)
+}
+
+var xsdIntegerBounds = map[string]struct {
+	min *big.Int
+	max *big.Int
+}{
+	"int":                {big.NewInt(math.MinInt32), big.NewInt(math.MaxInt32)},
+	"long":               {big.NewInt(math.MinInt64), big.NewInt(math.MaxInt64)},
+	"short":              {big.NewInt(math.MinInt16), big.NewInt(math.MaxInt16)},
+	"byte":               {big.NewInt(math.MinInt8), big.NewInt(math.MaxInt8)},
+	"nonNegativeInteger": {big.NewInt(0), nil},
+	"nonPositiveInteger": {nil, big.NewInt(0)},
+	"positiveInteger":    {big.NewInt(1), nil},
+	"negativeInteger":    {nil, big.NewInt(-1)},
+	"unsignedLong":       {big.NewInt(0), new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 64), big.NewInt(1))},
+	"unsignedInt":        {big.NewInt(0), big.NewInt(math.MaxUint32)},
+	"unsignedShort":      {big.NewInt(0), big.NewInt(math.MaxUint16)},
+	"unsignedByte":       {big.NewInt(0), big.NewInt(math.MaxUint8)},
+}
+
+func parseXSDInteger(value, datatype string) (interface{}, error) {
+	n, ok := new(big.Int).SetString(value, 10)
+	if !ok {
+		return nil, fmt.Errorf("invalid integer: %q", value)
+	}
+	if bounds, constrained := xsdIntegerBounds[datatype]; constrained {
+		if bounds.min != nil && n.Cmp(bounds.min) < 0 || bounds.max != nil && n.Cmp(bounds.max) > 0 {
+			return nil, fmt.Errorf("invalid %s: %q is outside its value space", datatype, value)
+		}
+	}
+	if n.IsInt64() {
+		return n.Int64(), nil
+	}
+	// Out of int64 range: fall back to float64, then to the lexical string.
+	if f, err := strconv.ParseFloat(value, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
+		return f, nil
+	}
+	return value, nil
 }
 
 func parseXSDDate(v string) (Date, error) {

@@ -388,12 +388,13 @@ func TestMapper_GenerateDatatypeAndOptionMappings(t *testing.T) {
 		}
 		m.Add(quad)
 	}
-	for _, datatype := range []string{
-		"integer", "int", "long", "short", "byte", "nonNegativeInteger",
-		"nonPositiveInteger", "positiveInteger", "negativeInteger", "unsignedLong",
-		"unsignedInt", "unsignedShort", "unsignedByte",
+	for datatype, value := range map[string]string{
+		"integer": "123", "int": "123", "long": "123", "short": "123", "byte": "123",
+		"nonNegativeInteger": "123", "nonPositiveInteger": "-123", "positiveInteger": "123",
+		"negativeInteger": "-123", "unsignedLong": "123", "unsignedInt": "123",
+		"unsignedShort": "123", "unsignedByte": "123",
 	} {
-		line := `<s> <http://example.org/integer_` + datatype + `> "123"^^<http://www.w3.org/2001/XMLSchema#` + datatype + `> .`
+		line := `<s> <http://example.org/integer_` + datatype + `> "` + value + `"^^<http://www.w3.org/2001/XMLSchema#` + datatype + `> .`
 		quad, err := parser.ParseQuad(line)
 		if err != nil {
 			t.Fatalf("ParseQuad(%q): %v", line, err)
