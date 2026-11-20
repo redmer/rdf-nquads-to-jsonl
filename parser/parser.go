@@ -37,8 +37,15 @@ type AnyURI string
 // XSDLanguage represents an xsd:language literal.
 type XSDLanguage string
 
-// XSDDecimal represents a finite xsd:decimal value.
-type XSDDecimal float64
+// XSDDecimal preserves the lexical form of a finite xsd:decimal value.
+// Its JSON representation is numeric, while mapping generation can use the
+// original digits for exact range checks.
+type XSDDecimal string
+
+// MarshalJSON emits the decimal as a JSON number without a float64 round trip.
+func (d XSDDecimal) MarshalJSON() ([]byte, error) {
+	return json.RawMessage(d), nil
+}
 
 // XSDKeyword represents an XSD literal that should be indexed as a keyword.
 type XSDKeyword string
@@ -291,7 +298,7 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 					if math.IsNaN(f) || math.IsInf(f, 0) {
 						return rawVal, rest, nil
 					}
-					return XSDDecimal(f), rest, nil
+					return XSDDecimal(rawVal), rest, nil
 				case "http://www.w3.org/2001/XMLSchema#double", "http://www.w3.org/2001/XMLSchema#float":
 					f, err := strconv.ParseFloat(rawVal, 64)
 					if err != nil {

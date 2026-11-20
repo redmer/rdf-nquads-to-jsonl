@@ -558,6 +558,14 @@ func TestMapper_DecimalOverflowFallsBackToDouble(t *testing.T) {
 		t.Errorf("max int64-scaled decimal = %v, want scaled_float", props["http://example org/edge"])
 	}
 
+	// The next decimal above the limit must not be rounded down to the same
+	// float64 as the boundary and incorrectly remain scaled_float.
+	m = mapping.NewMapper()
+	addDecimal(m, "http://example.org/overflow", "922337203685477.5808")
+	if props := generate(t, m); props["http://example org/overflow"].(map[string]interface{})["type"] != "double" {
+		t.Errorf("decimal immediately above int64-scaled limit = %v, want double", props["http://example org/overflow"])
+	}
+
 	// A mixed decimal/double field already maps to double regardless.
 	m = mapping.NewMapper()
 	addDecimal(m, "http://example.org/mixed", "1.25")

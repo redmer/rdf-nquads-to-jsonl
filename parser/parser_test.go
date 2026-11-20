@@ -101,7 +101,7 @@ func TestParseQuad(t *testing.T) {
 			line:     `<http://example.org/s> <http://example.org/p> "123.45"^^<http://www.w3.org/2001/XMLSchema#decimal> .`,
 			wantSubj: "http://example.org/s",
 			wantPred: "http://example.org/p",
-			wantObj:  parser.XSDDecimal(123.45),
+			wantObj:  parser.XSDDecimal("123.45"),
 		},
 		{
 			name:     "xsd:double",
