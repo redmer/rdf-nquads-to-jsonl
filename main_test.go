@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -257,6 +258,98 @@ func TestIDMaxBytesTooSmallRejected(t *testing.T) {
 		wOut.Close()
 		os.Stdin = oldStdin
 		os.Stdout = oldStdout
+	}
+}
+
+func TestRunMappingRejectsInvalidMappingOptions(t *testing.T) {
+	oldScalingFactor := *decimalScalingFactor
+	oldIgnoreAbove := *keywordIgnoreAbove
+	defer func() {
+		*decimalScalingFactor = oldScalingFactor
+		*keywordIgnoreAbove = oldIgnoreAbove
+	}()
+
+	for _, scalingFactor := range []float64{0, -1, math.NaN(), math.Inf(1)} {
+		*decimalScalingFactor = scalingFactor
+		if err := RunMapping(false); err == nil {
+			t.Errorf("RunMapping with scaling factor %v: expected validation error", scalingFactor)
+		}
+	}
+	*decimalScalingFactor = oldScalingFactor
+
+	*keywordIgnoreAbove = -1
+	if err := RunMapping(false); err == nil {
+		t.Fatal("RunMapping with negative keyword ignore_above: expected validation error")
+	}
+}
+
+func TestIgnoreMalformedGeoFlagControlsMapping(t *testing.T) {
+	oldIgnoreMalformedGeo := *ignoreMalformedGeo
+	oldStdin, oldStdout := os.Stdin, os.Stdout
+	defer func() {
+		*ignoreMalformedGeo = oldIgnoreMalformedGeo
+		os.Stdin, os.Stdout = oldStdin, oldStdout
+	}()
+
+	input := []byte(`<http://example.org/s> <http://example.org/geo> "invalid geometry"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .` + "\n")
+	for _, tt := range []struct {
+		name string
+		on   bool
+		want bool
+	}{
+		{name: "enabled", on: true, want: true},
+		{name: "disabled", on: false, want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			*ignoreMalformedGeo = tt.on
+			inputReader, inputWriter, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := inputWriter.Write(input); err != nil {
+				t.Fatal(err)
+			}
+			if err := inputWriter.Close(); err != nil {
+				t.Fatal(err)
+			}
+			os.Stdin = inputReader
+
+			outputReader, outputWriter, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			os.Stdout = outputWriter
+			var output bytes.Buffer
+			outputDone := make(chan struct{})
+			go func() {
+				_, _ = io.Copy(&output, outputReader)
+				close(outputDone)
+			}()
+
+			runErr := RunMapping(false)
+			_ = outputWriter.Close()
+			<-outputDone
+			_ = inputReader.Close()
+			_ = outputReader.Close()
+			os.Stdin, os.Stdout = oldStdin, oldStdout
+			if runErr != nil {
+				t.Fatalf("RunMapping failed: %v", runErr)
+			}
+
+			var mappingDoc map[string]interface{}
+			if err := json.Unmarshal(output.Bytes(), &mappingDoc); err != nil {
+				t.Fatalf("Invalid mapping JSON: %v", err)
+			}
+			properties := mappingDoc["properties"].(map[string]interface{})
+			geo := properties["http://example org/geo"].(map[string]interface{})
+			got, exists := geo["ignore_malformed"]
+			if tt.want && (!exists || got != true) {
+				t.Errorf("ignore_malformed = %v, want true", got)
+			}
+			if !tt.want && exists {
+				t.Errorf("ignore_malformed = %v, want omitted", got)
+			}
+		})
 	}
 }
 

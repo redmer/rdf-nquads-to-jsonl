@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"strings"
 
@@ -21,6 +22,13 @@ var includeGraphs = flag.String("include", "", "Comma-separated list of graph UR
 var excludeGraphs = flag.String("exclude", "", "Comma-separated list of graph URIs to exclude (blocklist)")
 var textAnalyzer = flag.String("text-analyzer", "", "Elasticsearch analyzer to apply to inferred text fields (overrides language-based inference)")
 var idMaxBytes = flag.Int("id-max-bytes", processor.DefaultMaxIDBytes, fmt.Sprintf("Maximum byte length of emitted document _id values; longer Subject URIs are truncated with a SHA-256 suffix. 0 disables the limit; values below %d are rejected", processor.MinMaxIDBytes))
+var decimalScalingFactor = flag.Float64("decimal-scaling-factor", 10000, "Scaling factor for Elasticsearch scaled_float fields inferred from xsd:decimal")
+var textKeywordSubfield = flag.Bool("text-keyword-subfield", true, "Add a keyword sub-field to inferred text fields")
+var keywordIgnoreAbove = flag.Int("keyword-ignore-above", 8191, "Maximum keyword value length before Elasticsearch skips indexing; 0 omits ignore_above")
+var copyTo = flag.String("copy-to", "", "Add copy_to to inferred text fields and create this catch-all text field")
+var keywordLowercaseNormalizer = flag.Bool("keyword-lowercase-normalizer", false, "Apply a lowercase normalizer to keyword fields and text keyword sub-fields")
+var ignoreMalformedGeo = flag.Bool("ignore-malformed-geo", true, "Skip malformed geo_shape values instead of rejecting the document")
+var dateSubfield = flag.Bool("date-subfield", false, "Map date fields as text with an ignore_malformed date sub-field")
 
 func main() {
 	flag.Parse()
@@ -57,7 +65,22 @@ func parseGraphList(list string) map[string]bool {
 }
 
 func RunMapping(config bool) error {
-	mapper := mapping.NewMapper()
+	if math.IsNaN(*decimalScalingFactor) || math.IsInf(*decimalScalingFactor, 0) || *decimalScalingFactor <= 0 {
+		return fmt.Errorf("invalid -decimal-scaling-factor %g: must be greater than 0", *decimalScalingFactor)
+	}
+	if *keywordIgnoreAbove < 0 {
+		return fmt.Errorf("invalid -keyword-ignore-above %d: use 0 to omit ignore_above, or a positive value", *keywordIgnoreAbove)
+	}
+
+	mapper := mapping.NewMapper(mapping.Options{
+		DecimalScalingFactor:       *decimalScalingFactor,
+		TextKeywordSubfield:        *textKeywordSubfield,
+		KeywordIgnoreAbove:         *keywordIgnoreAbove,
+		CopyTo:                     strings.TrimSpace(*copyTo),
+		KeywordLowercaseNormalizer: *keywordLowercaseNormalizer,
+		IgnoreMalformedGeo:         *ignoreMalformedGeo,
+		DateSubfield:               *dateSubfield,
+	})
 	mapper.SetTextAnalyzer(*textAnalyzer)
 	reader := bufio.NewReader(os.Stdin)
 
