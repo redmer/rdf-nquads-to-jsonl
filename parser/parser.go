@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -28,8 +29,27 @@ type Date string
 // DateTime represents an xsd:dateTime literal.
 type DateTime string
 
+// XSDTime represents an xsd:time literal.
+type XSDTime string
+
 // AnyURI represents an xsd:anyURI literal.
 type AnyURI string
+
+// XSDLanguage represents an xsd:language literal.
+type XSDLanguage string
+
+// XSDDecimal preserves the lexical form of a finite xsd:decimal value.
+// Its JSON representation is numeric, while mapping generation can use the
+// original digits for exact range checks.
+type XSDDecimal string
+
+// MarshalJSON emits the decimal as a JSON number without a float64 round trip.
+func (d XSDDecimal) MarshalJSON() ([]byte, error) {
+	return json.RawMessage(d), nil
+}
+
+// XSDKeyword represents an XSD literal that should be indexed as a keyword.
+type XSDKeyword string
 
 // RDFHTML represents an rdf:HTML literal.
 type RDFHTML string
@@ -240,20 +260,40 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 						return nil, "", fmt.Errorf("invalid boolean: %q", rawVal)
 					}
 					return b, rest, nil
-				case "http://www.w3.org/2001/XMLSchema#integer", "http://www.w3.org/2001/XMLSchema#int":
-					n, err := strconv.ParseInt(rawVal, 10, 64)
+				case "http://www.w3.org/2001/XMLSchema#integer",
+					"http://www.w3.org/2001/XMLSchema#int",
+					"http://www.w3.org/2001/XMLSchema#long",
+					"http://www.w3.org/2001/XMLSchema#short",
+					"http://www.w3.org/2001/XMLSchema#byte",
+					"http://www.w3.org/2001/XMLSchema#nonNegativeInteger",
+					"http://www.w3.org/2001/XMLSchema#nonPositiveInteger",
+					"http://www.w3.org/2001/XMLSchema#positiveInteger",
+					"http://www.w3.org/2001/XMLSchema#negativeInteger",
+					"http://www.w3.org/2001/XMLSchema#unsignedLong",
+					"http://www.w3.org/2001/XMLSchema#unsignedInt",
+					"http://www.w3.org/2001/XMLSchema#unsignedShort",
+					"http://www.w3.org/2001/XMLSchema#unsignedByte":
+					n, err := parseXSDInteger(rawVal, strings.TrimPrefix(datatype, "http://www.w3.org/2001/XMLSchema#"))
 					if err != nil {
-						if errors.Is(err, strconv.ErrRange) {
-							// Out of int64 range: fall back to float64, then to the lexical string.
-							if f, ferr := strconv.ParseFloat(rawVal, 64); ferr == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
-								return f, rest, nil
-							}
-							return rawVal, rest, nil
-						}
-						return nil, "", fmt.Errorf("invalid integer: %q", rawVal)
+						return nil, "", err
 					}
 					return n, rest, nil
-				case "http://www.w3.org/2001/XMLSchema#decimal", "http://www.w3.org/2001/XMLSchema#double", "http://www.w3.org/2001/XMLSchema#float":
+				case "http://www.w3.org/2001/XMLSchema#decimal":
+					f, err := strconv.ParseFloat(rawVal, 64)
+					if err != nil {
+						if rawVal == "INF" || rawVal == "+INF" || rawVal == "-INF" {
+							return rawVal, rest, nil
+						}
+						if errors.Is(err, strconv.ErrRange) && math.IsInf(f, 0) {
+							return rawVal, rest, nil
+						}
+						return nil, "", fmt.Errorf("invalid decimal: %q", rawVal)
+					}
+					if math.IsNaN(f) || math.IsInf(f, 0) {
+						return rawVal, rest, nil
+					}
+					return XSDDecimal(rawVal), rest, nil
+				case "http://www.w3.org/2001/XMLSchema#double", "http://www.w3.org/2001/XMLSchema#float":
 					f, err := strconv.ParseFloat(rawVal, 64)
 					if err != nil {
 						// JSON cannot represent Infinity. Accept the XSD spellings
@@ -285,6 +325,23 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 						return nil, "", err
 					}
 					return dt, rest, nil
+				case "http://www.w3.org/2001/XMLSchema#time":
+					t, err := parseXSDTime(rawVal)
+					if err != nil {
+						return nil, "", err
+					}
+					return t, rest, nil
+				case "http://www.w3.org/2001/XMLSchema#language":
+					return XSDLanguage(rawVal), rest, nil
+				// rdf:JSON has no dedicated representation: the lexical form is
+				// kept as a plain string so a predicate can mix rdf:JSON objects
+				// with scalars and still map to a single Elasticsearch field type.
+				case "http://www.w3.org/2001/XMLSchema#duration",
+					"http://www.w3.org/2001/XMLSchema#base64Binary",
+					"http://www.w3.org/2001/XMLSchema#hexBinary",
+					"http://www.w3.org/2001/XMLSchema#QName",
+					"http://www.w3.org/2001/XMLSchema#NMTOKEN":
+					return XSDKeyword(rawVal), rest, nil
 				case "http://www.w3.org/2001/XMLSchema#anyURI":
 					return AnyURI(rawVal), rest, nil
 				case "http://www.opengis.net/ont/geosparql#wktLiteral":
@@ -311,6 +368,44 @@ func parseLiteral(s string) (value interface{}, rest string, err error) {
 	return nil, "", fmt.Errorf("unterminated literal: %q", s)
 }
 
+var xsdIntegerBounds = map[string]struct {
+	min *big.Int
+	max *big.Int
+}{
+	"int":                {big.NewInt(math.MinInt32), big.NewInt(math.MaxInt32)},
+	"long":               {big.NewInt(math.MinInt64), big.NewInt(math.MaxInt64)},
+	"short":              {big.NewInt(math.MinInt16), big.NewInt(math.MaxInt16)},
+	"byte":               {big.NewInt(math.MinInt8), big.NewInt(math.MaxInt8)},
+	"nonNegativeInteger": {big.NewInt(0), nil},
+	"nonPositiveInteger": {nil, big.NewInt(0)},
+	"positiveInteger":    {big.NewInt(1), nil},
+	"negativeInteger":    {nil, big.NewInt(-1)},
+	"unsignedLong":       {big.NewInt(0), new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 64), big.NewInt(1))},
+	"unsignedInt":        {big.NewInt(0), big.NewInt(math.MaxUint32)},
+	"unsignedShort":      {big.NewInt(0), big.NewInt(math.MaxUint16)},
+	"unsignedByte":       {big.NewInt(0), big.NewInt(math.MaxUint8)},
+}
+
+func parseXSDInteger(value, datatype string) (interface{}, error) {
+	n, ok := new(big.Int).SetString(value, 10)
+	if !ok {
+		return nil, fmt.Errorf("invalid integer: %q", value)
+	}
+	if bounds, constrained := xsdIntegerBounds[datatype]; constrained {
+		if bounds.min != nil && n.Cmp(bounds.min) < 0 || bounds.max != nil && n.Cmp(bounds.max) > 0 {
+			return nil, fmt.Errorf("invalid %s: %q is outside its value space", datatype, value)
+		}
+	}
+	if n.IsInt64() {
+		return n.Int64(), nil
+	}
+	// Out of int64 range: fall back to float64, then to the lexical string.
+	if f, err := strconv.ParseFloat(value, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
+		return f, nil
+	}
+	return value, nil
+}
+
 func parseXSDDate(v string) (Date, error) {
 	for _, layout := range []string{"2006-01-02", "2006-01-02Z07:00"} {
 		if _, err := time.Parse(layout, v); err == nil {
@@ -327,4 +422,28 @@ func parseXSDDateTime(v string) (DateTime, error) {
 		}
 	}
 	return "", fmt.Errorf("invalid dateTime: %q", v)
+}
+
+func parseXSDTime(v string) (XSDTime, error) {
+	lexical := v
+	if strings.HasPrefix(v, "24:00:00") {
+		suffix := v[len("24:00:00"):]
+		if strings.HasPrefix(suffix, ".") {
+			suffix = strings.TrimLeft(suffix[1:], "0")
+		}
+		if suffix == "" || suffix == "Z" || strings.HasPrefix(suffix, "+") || strings.HasPrefix(suffix, "-") {
+			lexical = "00" + v[2:]
+		}
+	}
+	for _, layout := range []string{
+		"15:04:05",
+		"15:04:05.999999999",
+		"15:04:05Z07:00",
+		"15:04:05.999999999Z07:00",
+	} {
+		if _, err := time.Parse(layout, lexical); err == nil {
+			return XSDTime(lexical), nil
+		}
+	}
+	return "", fmt.Errorf("invalid time: %q", v)
 }

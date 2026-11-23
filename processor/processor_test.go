@@ -59,6 +59,39 @@ func TestGrouper(t *testing.T) {
 	}
 }
 
+func TestRDFJSONLiteralEmittedAsString(t *testing.T) {
+	quad, err := parser.ParseQuad(`<https://example.org/s> <https://example.org/data> "{\"nested\":{\"value\":1}}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .`)
+	if err != nil {
+		t.Fatalf("ParseQuad failed: %v", err)
+	}
+	var docs []processor.Document
+	g := processor.NewGrouper(func(doc processor.Document) {
+		docs = append(docs, doc)
+	})
+	g.Add(quad)
+	g.Flush()
+
+	if len(docs) != 1 {
+		t.Fatalf("documents = %d, want 1", len(docs))
+	}
+	b, err := json.Marshal(docs[0])
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	values, ok := got["https://example org/data"].([]interface{})
+	if !ok || len(values) != 1 {
+		t.Fatalf("data = %#v, want a one-element array", got["https://example org/data"])
+	}
+	str, ok := values[0].(string)
+	if !ok || str != `{"nested":{"value":1}}` {
+		t.Fatalf("data value = %#v, want the rdf:JSON lexical form as a string", values[0])
+	}
+}
+
 func TestGrouperDotReplacement(t *testing.T) {
 	quads := []parser.Quad{
 		{Subject: "https://example.com/s", Predicate: "http://schema.org/name", Object: "Test"},

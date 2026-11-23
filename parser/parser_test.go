@@ -101,7 +101,7 @@ func TestParseQuad(t *testing.T) {
 			line:     `<http://example.org/s> <http://example.org/p> "123.45"^^<http://www.w3.org/2001/XMLSchema#decimal> .`,
 			wantSubj: "http://example.org/s",
 			wantPred: "http://example.org/p",
-			wantObj:  123.45,
+			wantObj:  parser.XSDDecimal("123.45"),
 		},
 		{
 			name:     "xsd:double",
@@ -331,5 +331,119 @@ func TestGeoJSONMarshalJSON(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestXSDIntegerFamily(t *testing.T) {
+	tests := []struct {
+		datatype string
+		valid    []string
+		invalid  []string
+	}{
+		{datatype: "integer", valid: []string{"123", "9223372036854775808", strings.Repeat("9", 400)}},
+		{datatype: "int", valid: []string{"-2147483648", "2147483647"}, invalid: []string{"-2147483649", "2147483648"}},
+		{datatype: "long", valid: []string{"-9223372036854775808", "9223372036854775807"}, invalid: []string{"-9223372036854775809", "9223372036854775808"}},
+		{datatype: "short", valid: []string{"-32768", "32767"}, invalid: []string{"-32769", "32768"}},
+		{datatype: "byte", valid: []string{"-128", "127"}, invalid: []string{"-129", "128"}},
+		{datatype: "nonNegativeInteger", valid: []string{"0", "9223372036854775808"}, invalid: []string{"-1"}},
+		{datatype: "nonPositiveInteger", valid: []string{"-9223372036854775809", "0"}, invalid: []string{"1"}},
+		{datatype: "positiveInteger", valid: []string{"1", "9223372036854775808"}, invalid: []string{"-1", "0"}},
+		{datatype: "negativeInteger", valid: []string{"-9223372036854775809", "-1"}, invalid: []string{"0", "1"}},
+		{datatype: "unsignedLong", valid: []string{"0", "18446744073709551615"}, invalid: []string{"-1", "18446744073709551616"}},
+		{datatype: "unsignedInt", valid: []string{"0", "4294967295"}, invalid: []string{"-1", "4294967296"}},
+		{datatype: "unsignedShort", valid: []string{"0", "65535"}, invalid: []string{"-1", "65536"}},
+		{datatype: "unsignedByte", valid: []string{"0", "255"}, invalid: []string{"-1", "256"}},
+	}
+	integerFallback := map[string]bool{
+		"integer": true, "nonNegativeInteger": true, "nonPositiveInteger": true,
+		"positiveInteger": true, "negativeInteger": true, "unsignedLong": true,
+	}
+	for _, tt := range tests {
+		t.Run(tt.datatype, func(t *testing.T) {
+			for _, value := range tt.valid {
+				quad, err := parser.ParseQuad(`<s> <p> "` + value + `"^^<http://www.w3.org/2001/XMLSchema#` + tt.datatype + `> .`)
+				if err != nil {
+					t.Errorf("ParseQuad(%q) failed: %v", value, err)
+					continue
+				}
+				if len(value) < 400 && (!integerFallback[tt.datatype] || len(value) < 19) {
+					if _, ok := quad.Object.(int64); !ok {
+						t.Errorf("ParseQuad(%q) object = %#v (%T), want int64", value, quad.Object, quad.Object)
+					}
+				} else if len(value) < 400 {
+					if _, ok := quad.Object.(float64); !ok {
+						t.Errorf("ParseQuad(%q) object = %#v (%T), want float64 fallback", value, quad.Object, quad.Object)
+					}
+				} else if got, ok := quad.Object.(string); !ok || got != value {
+					t.Errorf("ParseQuad(%q) object = %#v (%T), want lexical string fallback", value, quad.Object, quad.Object)
+				}
+			}
+			for _, value := range tt.invalid {
+				if _, err := parser.ParseQuad(`<s> <p> "` + value + `"^^<http://www.w3.org/2001/XMLSchema#` + tt.datatype + `> .`); err == nil {
+					t.Errorf("ParseQuad(%q) accepted a value outside %s", value, tt.datatype)
+				}
+			}
+		})
+	}
+}
+
+func TestXSDDecimalSpecialValuesStayStrings(t *testing.T) {
+	for _, value := range []string{"INF", "+INF", "-INF", "NaN", "1e999"} {
+		t.Run(value, func(t *testing.T) {
+			quad, err := parser.ParseQuad(`<s> <p> "` + value + `"^^<http://www.w3.org/2001/XMLSchema#decimal> .`)
+			if err != nil {
+				t.Fatalf("ParseQuad failed: %v", err)
+			}
+			if got, ok := quad.Object.(string); !ok || got != value {
+				t.Fatalf("object = %#v (%T), want string %q", quad.Object, quad.Object, value)
+			}
+		})
+	}
+}
+
+func TestXSDTimeAndKeywordDatatypes(t *testing.T) {
+	tests := []struct {
+		datatype string
+		value    string
+		want     interface{}
+	}{
+		{"time", "12:34:56Z", parser.XSDTime("12:34:56Z")},
+		{"time", "12:34:56.123+02:00", parser.XSDTime("12:34:56.123+02:00")},
+		{"language", "en", parser.XSDLanguage("en")},
+		{"duration", "P1Y2M", parser.XSDKeyword("P1Y2M")},
+		{"base64Binary", "YWJj", parser.XSDKeyword("YWJj")},
+		{"hexBinary", "AABB", parser.XSDKeyword("AABB")},
+		{"QName", "ns:name", parser.XSDKeyword("ns:name")},
+		{"NMTOKEN", "name-token", parser.XSDKeyword("name-token")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.datatype+"/"+tt.value, func(t *testing.T) {
+			quad, err := parser.ParseQuad(`<s> <p> "` + tt.value + `"^^<http://www.w3.org/2001/XMLSchema#` + tt.datatype + `> .`)
+			if err != nil {
+				t.Fatalf("ParseQuad failed: %v", err)
+			}
+			if quad.Object != tt.want {
+				t.Fatalf("object = %#v, want %#v", quad.Object, tt.want)
+			}
+		})
+	}
+
+	if _, err := parser.ParseQuad(`<s> <p> "25:61:00"^^<http://www.w3.org/2001/XMLSchema#time> .`); err == nil {
+		t.Fatal("invalid xsd:time was accepted")
+	}
+}
+
+func TestRDFJSONParsesToPlainString(t *testing.T) {
+	// rdf:JSON has no dedicated representation: the lexical form is kept as a
+	// plain string so a predicate can mix rdf:JSON objects with scalars and
+	// still map to a single Elasticsearch field type.
+	for _, value := range []string{`{"nested":{"value":1}}`, `{invalid`, `[1,2]`} {
+		quad, err := parser.ParseQuad(`<s> <p> "` + strings.ReplaceAll(value, `"`, `\"`) + `"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .`)
+		if err != nil {
+			t.Fatalf("ParseQuad failed: %v", err)
+		}
+		if got, ok := quad.Object.(string); !ok || got != value {
+			t.Fatalf("object = %#v (%T), want string %q", quad.Object, quad.Object, value)
+		}
 	}
 }

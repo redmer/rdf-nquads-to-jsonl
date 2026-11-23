@@ -40,3 +40,5 @@ data.nq.gz
 full-kg.nq.gz
 .gitignore
 https___data.crow.nl_kg_rw-ft-html_.nq.gz
+/mapping*.json
+/config.json
